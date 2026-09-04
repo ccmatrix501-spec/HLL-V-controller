@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
@@ -21,13 +22,19 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
   ? process.env.COOKIE_SECURE === 'true'
   : IS_RAILWAY;
 
-// Intentionally disabled. The controller must never abort a valid HLL:V RCON
-// operation merely because it took longer than an arbitrary web timeout.
+// The controller does not impose an artificial timeout on valid RCON operations.
 const RCON_PROXY_TIMEOUT_MS = 0;
 
+// Repeat jobs run on the controller, not in the browser, so they continue when the
+// controller page is closed. Mount a Railway volume and set SCHEDULER_FILE to a path
+// on that volume if you also want jobs to survive service redeployments/restarts.
+const SCHEDULER_FILE = process.env.SCHEDULER_FILE || path.join(process.cwd(), 'repeat-jobs.json');
+const MIN_REPEAT_INTERVAL_SECONDS = Math.max(10, Number(process.env.MIN_REPEAT_INTERVAL_SECONDS || 30));
+const MAX_REPEAT_INTERVAL_SECONDS = 7 * 24 * 60 * 60;
+const MAX_REPEAT_JOBS = 100;
+
 // This controller is intentionally restricted to the exact HLL:V map pool used by
-// the server's MapRotation.ini. The UI receives only these maps, and direct map-change
-// requests are rejected if they target anything outside this list.
+// the server's MapRotation.ini.
 const HLLV_ALLOWED_MAPS = Object.freeze([
   'wdeva_offensivenva_day',
   'wdeva_offensiveus_day',
@@ -138,7 +145,9 @@ app.get('/controller/status', (req, res) => {
   res.json({
     authenticated: Boolean(req.session?.authenticated),
     qpanel_url: QPANEL_URL,
-    deployment: IS_RAILWAY ? 'railway' : 'local'
+    deployment: IS_RAILWAY ? 'railway' : 'local',
+    repeat_scheduler: true,
+    min_repeat_interval_seconds: MIN_REPEAT_INTERVAL_SECONDS
   });
 });
 
@@ -146,14 +155,223 @@ app.get('/controller/health', (req, res) => {
   res.json({ ok: true, service: '1stmi-hll-controller' });
 });
 
-// Return only the map pool actually configured for this HLL:V server.
+// ---------- Repeat scheduler ----------
+let repeatJobs = [];
+let repeatTickerBusy = false;
+
+function publicRepeatJob(job) {
+  return {
+    id: job.id,
+    type: job.type,
+    message: job.message,
+    player_id: job.player_id || null,
+    player_name: job.player_name || null,
+    interval_seconds: job.interval_seconds,
+    repeat_count: job.repeat_count,
+    sent_count: job.sent_count,
+    active: Boolean(job.active),
+    running: Boolean(job.running),
+    send_immediately: Boolean(job.send_immediately),
+    created_at: job.created_at,
+    last_sent_at: job.last_sent_at || null,
+    next_run_at: job.next_run_at || null,
+    last_error: job.last_error || null
+  };
+}
+
+function persistRepeatJobs() {
+  try {
+    const dir = path.dirname(SCHEDULER_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const safeJobs = repeatJobs.map(job => ({ ...job, running: false }));
+    const tmp = `${SCHEDULER_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(safeJobs, null, 2), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmp, SCHEDULER_FILE);
+  } catch (err) {
+    console.warn(`Repeat scheduler persistence unavailable: ${err.message}`);
+  }
+}
+
+function loadRepeatJobs() {
+  try {
+    if (!fs.existsSync(SCHEDULER_FILE)) return;
+    const parsed = JSON.parse(fs.readFileSync(SCHEDULER_FILE, 'utf8'));
+    if (!Array.isArray(parsed)) return;
+    const now = Date.now();
+    repeatJobs = parsed
+      .filter(job => job && typeof job === 'object' && ['broadcast', 'player_message'].includes(job.type))
+      .slice(0, MAX_REPEAT_JOBS)
+      .map(job => ({
+        ...job,
+        running: false,
+        active: Boolean(job.active),
+        sent_count: Number(job.sent_count || 0),
+        next_run_at: job.active
+          ? (job.next_run_at && Date.parse(job.next_run_at) > now ? job.next_run_at : new Date(now + Number(job.interval_seconds || 60) * 1000).toISOString())
+          : null
+      }));
+  } catch (err) {
+    console.warn(`Could not load repeat scheduler file: ${err.message}`);
+    repeatJobs = [];
+  }
+}
+
+async function postDirectToRcon(endpoint, body) {
+  const response = await fetch(`${RCON_BACKEND}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!response.ok) {
+    const detail = data?.error || data?.detail || text || `${response.status} ${response.statusText}`;
+    throw new Error(String(detail));
+  }
+  return data;
+}
+
+async function executeRepeatJob(job) {
+  if (!job.active || job.running) return;
+  job.running = true;
+  try {
+    if (job.type === 'broadcast') {
+      await postDirectToRcon('/api/v2/broadcast', { message: job.message });
+    } else {
+      await postDirectToRcon(`/api/v2/players/${encodeURIComponent(job.player_id)}/message`, { message: job.message });
+    }
+
+    job.sent_count += 1;
+    job.last_sent_at = new Date().toISOString();
+    job.last_error = null;
+
+    if (job.repeat_count > 0 && job.sent_count >= job.repeat_count) {
+      job.active = false;
+      job.next_run_at = null;
+    } else {
+      job.next_run_at = new Date(Date.now() + job.interval_seconds * 1000).toISOString();
+    }
+  } catch (err) {
+    job.last_error = err?.message || String(err);
+    // Keep the job active and retry at its next normal interval. This is useful if
+    // RCON is briefly disconnected or the game is changing map.
+    job.next_run_at = new Date(Date.now() + job.interval_seconds * 1000).toISOString();
+    console.warn(`Repeat job ${job.id} failed: ${job.last_error}`);
+  } finally {
+    job.running = false;
+    persistRepeatJobs();
+  }
+}
+
+async function processRepeatJobs() {
+  if (repeatTickerBusy) return;
+  repeatTickerBusy = true;
+  try {
+    const now = Date.now();
+    const due = repeatJobs.filter(job => job.active && !job.running && job.next_run_at && Date.parse(job.next_run_at) <= now);
+    // Execute independently so one slow message does not block other timers.
+    await Promise.allSettled(due.map(executeRepeatJob));
+  } finally {
+    repeatTickerBusy = false;
+  }
+}
+
+loadRepeatJobs();
+const repeatTicker = setInterval(processRepeatJobs, 1000);
+repeatTicker.unref();
+
+app.get('/controller/repeat-jobs', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    jobs: repeatJobs.map(publicRepeatJob),
+    min_interval_seconds: MIN_REPEAT_INTERVAL_SECONDS,
+    storage_file: SCHEDULER_FILE
+  });
+});
+
+app.post('/controller/repeat-jobs', requireAuth, async (req, res) => {
+  if (repeatJobs.length >= MAX_REPEAT_JOBS) {
+    return res.status(400).json({ error: `Maximum of ${MAX_REPEAT_JOBS} repeat jobs reached.` });
+  }
+
+  const type = String(req.body?.type || '').trim();
+  const message = String(req.body?.message || '').trim();
+  const playerId = String(req.body?.player_id || '').trim();
+  const playerName = String(req.body?.player_name || '').trim();
+  const intervalSeconds = Number(req.body?.interval_seconds);
+  const repeatCount = Number(req.body?.repeat_count || 0);
+  const sendImmediately = req.body?.send_immediately !== false;
+
+  if (!['broadcast', 'player_message'].includes(type)) {
+    return res.status(400).json({ error: 'type must be broadcast or player_message' });
+  }
+  if (!message) return res.status(400).json({ error: 'message is required' });
+  if (message.length > 500) return res.status(400).json({ error: 'message cannot exceed 500 characters' });
+  if (type === 'player_message' && !playerId) return res.status(400).json({ error: 'player_id is required for player messages' });
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds < MIN_REPEAT_INTERVAL_SECONDS || intervalSeconds > MAX_REPEAT_INTERVAL_SECONDS) {
+    return res.status(400).json({ error: `interval_seconds must be between ${MIN_REPEAT_INTERVAL_SECONDS} and ${MAX_REPEAT_INTERVAL_SECONDS}` });
+  }
+  if (!Number.isInteger(repeatCount) || repeatCount < 0 || repeatCount > 10000) {
+    return res.status(400).json({ error: 'repeat_count must be 0 (forever) or an integer from 1 to 10000' });
+  }
+
+  const now = new Date();
+  const job = {
+    id: crypto.randomUUID(),
+    type,
+    message,
+    player_id: type === 'player_message' ? playerId : null,
+    player_name: type === 'player_message' ? (playerName || playerId) : null,
+    interval_seconds: Math.round(intervalSeconds),
+    repeat_count: repeatCount,
+    sent_count: 0,
+    active: true,
+    running: false,
+    send_immediately: sendImmediately,
+    created_at: now.toISOString(),
+    last_sent_at: null,
+    next_run_at: sendImmediately ? now.toISOString() : new Date(now.getTime() + intervalSeconds * 1000).toISOString(),
+    last_error: null
+  };
+
+  repeatJobs.push(job);
+  persistRepeatJobs();
+  // Do not make the browser wait on a slow RCON send. The scheduler will execute it.
+  setImmediate(processRepeatJobs);
+  return res.status(201).json({ ok: true, job: publicRepeatJob(job) });
+});
+
+app.post('/controller/repeat-jobs/:id/run-now', requireAuth, (req, res) => {
+  const job = repeatJobs.find(item => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: 'Repeat job not found' });
+  if (!job.active) job.active = true;
+  job.next_run_at = new Date().toISOString();
+  persistRepeatJobs();
+  setImmediate(processRepeatJobs);
+  res.json({ ok: true, job: publicRepeatJob(job) });
+});
+
+app.delete('/controller/repeat-jobs/:id', requireAuth, (req, res) => {
+  const index = repeatJobs.findIndex(item => item.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: 'Repeat job not found' });
+  repeatJobs.splice(index, 1);
+  persistRepeatJobs();
+  res.json({ ok: true });
+});
+
+app.delete('/controller/repeat-jobs', requireAuth, (req, res) => {
+  repeatJobs = [];
+  persistRepeatJobs();
+  res.json({ ok: true });
+});
+
+// ---------- HLL:V map restrictions ----------
 app.get('/api/v2/maps', requireAuth, (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(HLLV_ALLOWED_MAPS);
 });
 
-// Enforce the same map pool server-side so a crafted request cannot change to a map
-// that is not part of MapRotation.ini.
 app.post('/api/v2/change-map', requireAuth, (req, res, next) => {
   const requested = String(req.body?.map_name || '').trim().toLowerCase();
   if (!HLLV_ALLOWED_MAP_SET.has(requested)) {
@@ -207,13 +425,16 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`RCON backend: ${RCON_BACKEND}`);
   console.log('RCON proxy timeout: disabled');
   console.log(`HLL:V map pool locked to ${HLLV_ALLOWED_MAPS.length} configured maps`);
+  console.log(`Repeat scheduler active; minimum interval ${MIN_REPEAT_INTERVAL_SECONDS}s; ${repeatJobs.filter(j => j.active).length} active job(s)`);
+  console.log(`Repeat scheduler file: ${SCHEDULER_FILE}`);
 });
 
-// Do not apply Node's request-duration timeout to RCON proxy operations.
 server.requestTimeout = 0;
 
 function shutdown(signal) {
-  console.log(`${signal} received. Closing HTTP server...`);
+  console.log(`${signal} received. Saving repeat jobs and closing HTTP server...`);
+  clearInterval(repeatTicker);
+  persistRepeatJobs();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10000).unref();
 }
