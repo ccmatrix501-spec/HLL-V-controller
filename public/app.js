@@ -34,7 +34,7 @@ function updateConnection(connected){state.connected=connected;const p=$('#conne
 async function checkRcon(){try{const s=await request('/api/v2/connection/status');updateConnection(Boolean(s.connected));if(s.connected){await refreshAllCore()}}catch{updateConnection(false)}}
 $('#connectBtn').addEventListener('click',async()=>{if(state.connected){if(confirm('Disconnect this RCON session?')){try{await post('/api/v2/disconnect',{});updateConnection(false);toast('RCON disconnected')}catch(e){toast(e.message,'error')}}}else{$('#rconHost').value=localStorage.getItem('hll_rcon_host')||'';$('#rconPort').value=localStorage.getItem('hll_rcon_port')||'';$('#connectError').textContent='';$('#connectDialog').showModal()}})
 $$('[data-close-dialog]').forEach(b=>b.onclick=()=>$('#connectDialog').close())
-$('#connectForm').addEventListener('submit',async e=>{e.preventDefault();$('#connectError').textContent='';const host=$('#rconHost').value.trim(),port=Number($('#rconPort').value),password=$('#rconPassword').value;try{await post('/api/v2/connect',{host,port,password});localStorage.setItem('hll_rcon_host',host);localStorage.setItem('hll_rcon_port',String(port));$('#rconPassword').value='';$('#connectDialog').close();updateConnection(true);toast('Connected to Hell Let Loose RCON');await refreshAllCore()}catch(err){$('#connectError').textContent=err.message}})
+$('#connectForm').addEventListener('submit',async e=>{e.preventDefault();$('#connectError').textContent='';const host=$('#rconHost').value.trim(),port=Number($('#rconPort').value),password=$('#rconPassword').value;const submit=e.submitter||$('#connectForm button[type="submit"]');const oldText=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Connecting...'}try{await post('/api/v2/connect',{host,port,password});localStorage.setItem('hll_rcon_host',host);localStorage.setItem('hll_rcon_port',String(port));$('#rconPassword').value='';$('#connectDialog').close();updateConnection(true);toast('Connected to Hell Let Loose: Vietnam RCON');await refreshAllCore()}catch(err){$('#connectError').textContent=err.message}finally{if(submit){submit.disabled=false;submit.textContent=oldText||'Connect'}}})
 
 async function refreshAllCore(){await Promise.allSettled([loadServer(),loadPlayers(),loadMaps(),loadRotation()])}
 async function loadServer(){if(!state.connected)return;try{const data=await request('/api/v2/server?type=session');state.server=data;$('#sessionRaw').textContent=pretty(data);const o=(data&&typeof data==='object')?data:{};const players=first(o,['player_count','PlayerCount','players','Players','current_players','CurrentPlayers'],null);const max=first(o,['max_players','MaxPlayers','slots','Slots'],null);if(typeof players==='number'){$('#statPlayers').textContent=max&&typeof max==='number'?`${players}/${max}`:String(players)}
@@ -45,11 +45,108 @@ function playerId(p){return String(first(p,['id','ID','player_id','PlayerId','pl
 function renderPlayers(error=''){const q=$('#playerSearch').value.trim().toLowerCase();const rows=state.players.filter(p=>pretty(p).toLowerCase().includes(q));const body=$('#playersBody');if(error){body.innerHTML=`<tr><td colspan="5" class="empty"></td></tr>`;body.querySelector('td').textContent=error;return}if(!rows.length){body.innerHTML='<tr><td colspan="5" class="empty">No players found.</td></tr>';return}body.innerHTML='';for(const p of rows){const id=playerId(p);const name=first(p,['name','Name','player_name','PlayerName'],'Unknown Player');const team=first(p,['team','Team','team_name','TeamName']);const unit=first(p,['unit','Unit','platoon','Platoon','squad','Squad']);const role=first(p,['role','Role']);const score=first(p,['score','Score','combat','Combat']);const ping=first(p,['ping','Ping']);const tr=document.createElement('tr');tr.innerHTML=`<td><span class="player-name"></span><span class="player-id"></span></td><td></td><td></td><td></td><td><div class="action-row"></div></td>`;tr.children[0].querySelector('.player-name').textContent=name;tr.children[0].querySelector('.player-id').textContent=id;tr.children[1].textContent=team;tr.children[2].textContent=[unit,role].filter(x=>x&&x!=='—').join(' / ')||'—';tr.children[3].textContent=[score!== '—'?`Score ${score}`:'',ping!=='—'?`Ping ${ping}`:''].filter(Boolean).join(' / ')||'—';const ar=tr.querySelector('.action-row');[['message','Message'],['punish','Punish'],['force','Switch'],['kick','Kick'],['tempban','Temp Ban'],['permaban','Perma Ban']].forEach(([a,label])=>{const b=document.createElement('button');b.className=`action-btn ${['kick','tempban','permaban'].includes(a)?'danger':''}`;b.textContent=label;b.type='button';b.onclick=()=>openPlayerAction(a,id,String(name));ar.appendChild(b)});body.appendChild(tr)}}
 $('#playerSearch').addEventListener('input',()=>renderPlayers())
 
-function openPlayerAction(type,id,name){$('#actionType').value=type;$('#actionPlayerId').value=id;$('#playerDialogTitle').textContent=`${name} — ${type.toUpperCase()}`;$('#reasonLabel').classList.toggle('hidden',type==='message'||type==='force');$('#messageLabel').classList.toggle('hidden',type!=='message');$('#durationLabel').classList.toggle('hidden',type!=='tempban');$('#adminNameLabel').classList.toggle('hidden',!['tempban','permaban'].includes(type));$('#forceModeLabel').classList.toggle('hidden',type!=='force');$('#playerActionSubmit').textContent=type==='message'?'Send':type==='force'?'Switch Team':'Confirm';$('#playerDialog').showModal()}
+function ensurePlayerMessageHelper(){
+  const label=$('#messageLabel');
+  if(!label||$('#playerMessageReadableBtn'))return;
+  const btn=document.createElement('button');
+  btn.id='playerMessageReadableBtn';
+  btn.type='button';
+  btn.className='btn ghost small';
+  btn.textContent='Make easier to read';
+  btn.addEventListener('click',()=>{
+    const box=$('#actionMessage');
+    const text=box.value.trim();
+    if(!text){box.value='[ 1ST M.I. ADMIN ]\n\n';box.focus();return}
+    if(!text.startsWith('[ 1ST M.I. ADMIN ]'))box.value=`[ 1ST M.I. ADMIN ]\n\n${text}`;
+    box.focus();
+  });
+  label.appendChild(btn);
+}
+
+function openPlayerAction(type,id,name){$('#actionType').value=type;$('#actionPlayerId').value=id;$('#playerDialogTitle').textContent=`${name} — ${type.toUpperCase()}`;$('#reasonLabel').classList.toggle('hidden',type==='message'||type==='force');$('#messageLabel').classList.toggle('hidden',type!=='message');$('#durationLabel').classList.toggle('hidden',type!=='tempban');$('#adminNameLabel').classList.toggle('hidden',!['tempban','permaban'].includes(type));$('#forceModeLabel').classList.toggle('hidden',type!=='force');$('#playerActionSubmit').textContent=type==='message'?'Send':type==='force'?'Switch Team':'Confirm';if(type==='message')ensurePlayerMessageHelper();$('#playerDialog').showModal()}
 $$('[data-close-player]').forEach(b=>b.onclick=()=>$('#playerDialog').close())
 $('#playerActionForm').addEventListener('submit',async e=>{e.preventDefault();const type=$('#actionType').value,id=$('#actionPlayerId').value,reason=$('#actionReason').value.trim();try{if(type==='message')await post(`/api/v2/players/${encodeURIComponent(id)}/message`,{message:$('#actionMessage').value});if(type==='punish')await post('/api/v2/punish',{player_id:id,reason});if(type==='kick')await post('/api/v2/kick',{player_id:id,reason});if(type==='force')await post('/api/v2/force-team-switch',{player_id:id,force_mode:Number($('#actionForceMode').value)});if(type==='tempban')await post('/api/v2/temp-ban',{player_id:id,duration:Number($('#actionDuration').value),reason,admin_name:$('#actionAdminName').value});if(type==='permaban')await post('/api/v2/perma-ban',{player_id:id,reason,admin_name:$('#actionAdminName').value});$('#playerDialog').close();toast('Player action sent successfully');setTimeout(loadPlayers,800)}catch(err){toast(err.message,'error')}})
 
-$('#broadcastForm').addEventListener('submit',async e=>{e.preventDefault();try{await post('/api/v2/broadcast',{message:$('#broadcastText').value});$('#broadcastText').value='';toast('Broadcast sent')}catch(err){toast(err.message,'error')}})
+function getTemplateMapName(){
+  const selected=$('#mapSelect')?.value;
+  if(selected)return selected;
+  const s=state.server&&typeof state.server==='object'?state.server:{};
+  const next=first(s,['next_map','NextMap','nextMap','MapNext'],'');
+  if(next&&next!=='—')return String(next);
+  return 'NEXT MAP';
+}
+
+const broadcastTemplates={
+  recruitment:()=>`[ 1ST M.I. RECRUITMENT ]\n\nJOIN THE 1ST MOBILE INFANTRY\nALPHA COMPANY IS RECRUITING\n\nDiscord.gg/1stMi`,
+  restart:()=>`[ SERVER RESTART WARNING ]\n\nTHE SERVER WILL RESTART SOON.\nPLEASE FINISH YOUR CURRENT ACTIONS\nAND REJOIN AFTER THE RESTART.`,
+  mapchange:()=>`[ MAP CHANGE NOTICE ]\n\nNEXT MAP:\n${getTemplateMapName()}\n\nPREPARE FOR MAP CHANGE.`,
+  admin:()=>`[ ADMIN NOTICE ]\n\nPLEASE FOLLOW SERVER RULES\nAND ADMIN INSTRUCTIONS.\n\nTHANK YOU FOR KEEPING THE SERVER FAIR.`,
+  rules:()=>`[ SERVER RULES ]\n\nNO TEAMKILLING OR GRIEFING\nFOLLOW ADMIN INSTRUCTIONS\nPLAY THE OBJECTIVE\nKEEP COMMS RESPECTFUL`,
+  discord:()=>`[ 1ST M.I. COMMUNITY ]\n\nJOIN OUR DISCORD FOR EVENTS,\nSQUADS, SUPPORT AND RECRUITMENT.\n\nDiscord.gg/1stMi`,
+  event:()=>`[ EVENT STARTING ]\n\nA 1ST M.I. SERVER EVENT IS STARTING NOW.\nFOLLOW ADMIN INSTRUCTIONS\nAND GET READY TO DEPLOY.`,
+  seeding:()=>`[ SERVER SEEDING ]\n\nHELP US GET THE SERVER POPULATED.\nSTAY IN SERVER, INVITE YOUR SQUAD,\nAND HELP START THE FIGHT.`
+};
+
+function installBroadcastTemplates(){
+  const form=$('#broadcastForm');
+  const box=$('#broadcastText');
+  if(!form||!box||$('#broadcastTemplateBar'))return;
+
+  const intro=document.createElement('div');
+  intro.id='broadcastTemplateBar';
+  intro.innerHTML='<p class="muted" style="margin:0">High-visibility presets — choose one, edit it if needed, then send.</p>';
+  const buttons=document.createElement('div');
+  buttons.className='action-row';
+  const labels=[
+    ['recruitment','Recruitment'],
+    ['restart','Restart Warning'],
+    ['mapchange','Map Change'],
+    ['admin','Admin Notice'],
+    ['rules','Server Rules'],
+    ['discord','Discord Advertisement'],
+    ['event','Event Starting'],
+    ['seeding','Seeding Message']
+  ];
+  for(const [key,label] of labels){
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='btn ghost small';
+    b.textContent=label;
+    b.addEventListener('click',()=>{
+      box.value=broadcastTemplates[key]();
+      updateBroadcastCounter();
+      box.focus();
+    });
+    buttons.appendChild(b);
+  }
+  intro.appendChild(buttons);
+  form.insertBefore(intro,box);
+
+  const footer=document.createElement('div');
+  footer.className='inline';
+  const counter=document.createElement('span');
+  counter.id='broadcastCharCount';
+  counter.className='muted';
+  const clear=document.createElement('button');
+  clear.type='button';
+  clear.className='btn ghost small';
+  clear.textContent='Clear';
+  clear.addEventListener('click',()=>{box.value='';updateBroadcastCounter();box.focus()});
+  footer.append(counter,clear);
+  form.insertBefore(footer,form.querySelector('button[type="submit"]'));
+  box.addEventListener('input',updateBroadcastCounter);
+  updateBroadcastCounter();
+}
+
+function updateBroadcastCounter(){
+  const box=$('#broadcastText');
+  const count=$('#broadcastCharCount');
+  if(box&&count)count.textContent=`${box.value.length} / ${box.maxLength||500} characters`;
+}
+
+installBroadcastTemplates();
+
+$('#broadcastForm').addEventListener('submit',async e=>{e.preventDefault();try{await post('/api/v2/broadcast',{message:$('#broadcastText').value});$('#broadcastText').value='';updateBroadcastCounter();toast('Broadcast sent')}catch(err){toast(err.message,'error')}})
 
 async function loadMaps(){if(!state.connected)return;try{const raw=await request('/api/v2/maps');let maps=[];if(Array.isArray(raw))maps=raw;else if(typeof raw==='string')maps=raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);else maps=asArray(raw);state.maps=maps.map(m=>typeof m==='string'?m:first(m,['name','Name','id','Id','map_name','MapName'],pretty(m)));const sel=$('#mapSelect');sel.innerHTML='<option value="">Select map...</option>';for(const m of state.maps){const o=document.createElement('option');o.value=m;o.textContent=m;sel.appendChild(o)}}catch(e){toast(`Map list: ${e.message}`,'error')}}
 async function loadRotation(){if(!state.connected)return;const [r,s]=await Promise.allSettled([request('/api/v2/map-rotation'),request('/api/v2/map-sequence')]);$('#rotationBox').textContent=r.status==='fulfilled'?pretty(r.value):r.reason.message;$('#sequenceBox').textContent=s.status==='fulfilled'?pretty(s.value):s.reason.message}
