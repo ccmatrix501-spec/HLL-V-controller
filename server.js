@@ -25,6 +25,25 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
 // operation merely because it took longer than an arbitrary web timeout.
 const RCON_PROXY_TIMEOUT_MS = 0;
 
+// This controller is intentionally restricted to the exact HLL:V map pool used by
+// the server's MapRotation.ini. The UI receives only these maps, and direct map-change
+// requests are rejected if they target anything outside this list.
+const HLLV_ALLOWED_MAPS = Object.freeze([
+  'wdeva_offensivenva_day',
+  'wdeva_offensiveus_day',
+  'wdevb_offensivenva_day',
+  'wdevb_offensiveus_day',
+  'wdevc_offensivenva_day',
+  'wdevc_offensiveus_day',
+  'wdevd_offensivenva_day',
+  'wdevd_offensiveus_day',
+  'wdeve_offensivenva_day',
+  'wdeve_offensiveus_day',
+  'wdevf_offensivenva_day',
+  'wdevf_offensiveus_day'
+]);
+const HLLV_ALLOWED_MAP_SET = new Set(HLLV_ALLOWED_MAPS);
+
 if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 10) {
   console.error('PANEL_PASSWORD must be set and at least 10 characters long.');
   process.exit(1);
@@ -127,6 +146,26 @@ app.get('/controller/health', (req, res) => {
   res.json({ ok: true, service: '1stmi-hll-controller' });
 });
 
+// Return only the map pool actually configured for this HLL:V server.
+app.get('/api/v2/maps', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(HLLV_ALLOWED_MAPS);
+});
+
+// Enforce the same map pool server-side so a crafted request cannot change to a map
+// that is not part of MapRotation.ini.
+app.post('/api/v2/change-map', requireAuth, (req, res, next) => {
+  const requested = String(req.body?.map_name || '').trim().toLowerCase();
+  if (!HLLV_ALLOWED_MAP_SET.has(requested)) {
+    return res.status(400).json({
+      error: 'Map is not in the configured HLL:V rotation.',
+      allowed_maps: HLLV_ALLOWED_MAPS
+    });
+  }
+  req.body.map_name = requested;
+  next();
+});
+
 const rconProxy = createProxyMiddleware({
   target: RCON_BACKEND,
   changeOrigin: true,
@@ -167,6 +206,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Deployment: ${IS_RAILWAY ? 'Railway' : 'local'}`);
   console.log(`RCON backend: ${RCON_BACKEND}`);
   console.log('RCON proxy timeout: disabled');
+  console.log(`HLL:V map pool locked to ${HLLV_ALLOWED_MAPS.length} configured maps`);
 });
 
 // Do not apply Node's request-duration timeout to RCON proxy operations.
