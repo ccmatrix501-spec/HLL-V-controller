@@ -1,9 +1,21 @@
 (() => {
   const MODE_LABELS = {
     all: 'All configured modes',
+    warfare: 'Warfare',
     offensivenva: 'Offensive - NVA',
-    offensiveus: 'Offensive - US'
+    offensiveus: 'Offensive - US',
+    domination: 'Domination',
+    conquest: 'Conquest'
   };
+
+  const FALLBACK_CATALOG = [
+    'wdeva_warfare_day','wdeva_offensivenva_day','wdeva_offensiveus_day','wdeva_domination_day','wdeva_conquest_day',
+    'wdevb_warfare_day','wdevb_offensivenva_day','wdevb_offensiveus_day','wdevb_domination_day','wdevb_conquest_day',
+    'wdevc_warfare_day','wdevc_offensivenva_day','wdevc_offensiveus_day','wdevc_domination_day','wdevc_conquest_day',
+    'wdevd_warfare_day','wdevd_offensivenva_day','wdevd_offensiveus_day','wdevd_domination_day','wdevd_conquest_day',
+    'wdeve_warfare_day','wdeve_conquest_day','wdeve_offensivenva_day','wdeve_offensiveus_day','wdeve_domination_day',
+    'wdevf_warfare_day','wdevf_offensivenva_day','wdevf_offensiveus_day','wdevf_domination_day','wdevf_conquest_day'
+  ];
 
   let catalog = [];
   let rotationDraft = [];
@@ -11,8 +23,11 @@
 
   function mapMode(mapName) {
     const name = String(mapName || '').toLowerCase();
+    if (name.includes('_warfare_')) return 'warfare';
     if (name.includes('_offensivenva_')) return 'offensivenva';
     if (name.includes('_offensiveus_')) return 'offensiveus';
+    if (name.includes('_domination_')) return 'domination';
+    if (name.includes('_conquest_')) return 'conquest';
     return 'other';
   }
 
@@ -51,7 +66,9 @@
 
   function modeOptions(select, includeAll = true) {
     select.innerHTML = '';
-    const modes = includeAll ? ['all', 'offensivenva', 'offensiveus'] : ['offensivenva', 'offensiveus'];
+    const modes = includeAll
+      ? ['all', 'warfare', 'offensivenva', 'offensiveus', 'domination', 'conquest']
+      : ['warfare', 'offensivenva', 'offensiveus', 'domination', 'conquest'];
     for (const mode of modes) {
       const opt = document.createElement('option');
       opt.value = mode;
@@ -97,7 +114,7 @@
 
     const note = document.createElement('div');
     note.className = 'map-mode-note';
-    note.textContent = 'Choose a game-mode variant first; the Map list will only show matching HLL:V maps.';
+    note.textContent = 'Choose a game mode first; the Map list will only show matching HLL:V maps.';
     form.insertBefore(note, mapSelect.closest('label'));
 
     const observer = new MutationObserver(() => {
@@ -107,6 +124,45 @@
 
     const refresh = document.querySelector('#maps [data-refresh="maps"]');
     if (refresh) refresh.addEventListener('click', () => setTimeout(renderChangeMapOptions, 150));
+  }
+
+  function installChangeMapSubmitOverride() {
+    const form = document.querySelector('#changeMapForm');
+    const select = document.querySelector('#mapSelect');
+    if (!form || !select || form.dataset.hllvModeAware === '1') return;
+    form.dataset.hllvModeAware = '1';
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const mapName = String(select.value || '').trim().toLowerCase();
+      if (!mapName) return;
+      if (!catalog.includes(mapName)) {
+        if (typeof window.toast === 'function') window.toast('That map is not in the configured HLL:V catalog.', 'error');
+        else alert('That map is not in the configured HLL:V catalog.');
+        return;
+      }
+      if (!confirm(`Change the live server to ${mapLabel(mapName)} now?`)) return;
+      const button = form.querySelector('button[type="submit"]');
+      const oldText = button?.textContent;
+      if (button) { button.disabled = true; button.textContent = 'Changing Map...'; }
+      try {
+        await api('/api/v2/map-change', {
+          method: 'POST',
+          body: JSON.stringify({ map_name: mapName })
+        });
+        if (typeof window.toast === 'function') window.toast(`Map change sent: ${mapLabel(mapName)}`);
+        setTimeout(() => {
+          document.querySelector('[data-refresh="server"]')?.click();
+          document.querySelector('#maps [data-refresh="maps"]')?.click();
+        }, 1200);
+      } catch (err) {
+        if (typeof window.toast === 'function') window.toast(err.message, 'error');
+        else alert(err.message);
+      } finally {
+        if (button) { button.disabled = false; button.textContent = oldText || 'Change Map Now'; }
+      }
+    }, true);
   }
 
   function parseRotation(data) {
@@ -314,19 +370,18 @@
 
   async function init() {
     try {
-      const raw = await api('/api/v2/maps');
-      catalog = (Array.isArray(raw) ? raw : []).map(x => String(x).trim().toLowerCase()).filter(Boolean);
+      const raw = await api('/api/v2/map-catalog');
+      const entries = Array.isArray(raw?.maps) ? raw.maps : [];
+      catalog = entries
+        .map(entry => typeof entry === 'string' ? entry : entry?.id)
+        .map(x => String(x || '').trim().toLowerCase())
+        .filter(Boolean);
+      if (!catalog.length) throw new Error('Empty map catalog');
     } catch {
-      catalog = [
-        'wdeva_offensivenva_day','wdeva_offensiveus_day',
-        'wdevb_offensivenva_day','wdevb_offensiveus_day',
-        'wdevc_offensivenva_day','wdevc_offensiveus_day',
-        'wdevd_offensivenva_day','wdevd_offensiveus_day',
-        'wdeve_offensivenva_day','wdeve_offensiveus_day',
-        'wdevf_offensivenva_day','wdevf_offensiveus_day'
-      ];
+      catalog = [...FALLBACK_CATALOG];
     }
     installGameModeSelector();
+    installChangeMapSubmitOverride();
     installRotationBuilder();
     renderChangeMapOptions();
   }
