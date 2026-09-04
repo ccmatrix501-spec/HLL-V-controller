@@ -110,7 +110,12 @@
     if (!messageLabel || document.querySelector('#playerRepeatControl')) return;
     const control = makeRepeatControls('player', 'Repeat this player message');
     control.id = 'playerRepeatControl';
-    messageLabel.appendChild(control);
+    control.classList.add('hidden');
+    messageLabel.insertAdjacentElement('afterend', control);
+
+    const syncVisibility = () => control.classList.toggle('hidden', messageLabel.classList.contains('hidden'));
+    new MutationObserver(syncVisibility).observe(messageLabel, { attributes: true, attributeFilter: ['class'] });
+    syncVisibility();
 
     control.querySelector('#playerStartRepeat').addEventListener('click', async () => {
       const message = document.querySelector('#actionMessage')?.value.trim() || '';
@@ -232,9 +237,8 @@
       head.className = 'repeat-job-head';
       const title = document.createElement('div');
       const kind = job.type === 'broadcast' ? 'BROADCAST' : 'PLAYER MESSAGE';
-      const target = job.type === 'player_message' ? ` → ${job.player_name || job.player_id}` : '';
       title.innerHTML = `<span class="repeat-kind">${kind}</span><strong></strong>`;
-      title.querySelector('strong').textContent = target ? target.slice(3) : 'All players';
+      title.querySelector('strong').textContent = job.type === 'player_message' ? (job.player_name || job.player_id) : 'All players';
       const status = document.createElement('span');
       status.className = `repeat-status ${job.active ? 'on' : 'done'}`;
       status.textContent = job.running ? 'SENDING' : (job.active ? 'ACTIVE' : 'COMPLETE');
@@ -253,13 +257,13 @@
         <span><b>Next</b>${job.active ? formatNext(job.next_run_at) : '—'}</span>
       `;
 
+      card.append(head, preview, meta);
+
       if (job.last_error) {
         const error = document.createElement('div');
         error.className = 'repeat-job-error';
         error.textContent = `Last send failed: ${job.last_error} — timer will retry at the next interval.`;
-        card.append(head, preview, meta, error);
-      } else {
-        card.append(head, preview, meta);
+        card.appendChild(error);
       }
 
       const actions = document.createElement('div');
@@ -300,7 +304,6 @@
       const data = await request('/controller/repeat-jobs');
       renderRepeatJobs(Array.isArray(data?.jobs) ? data.jobs : []);
     } catch (err) {
-      // 401 is normal while sitting on the controller login screen.
       if (!String(err.message).includes('401')) {
         const list = document.querySelector('#repeatJobsList');
         if (list) list.textContent = `Could not load repeat timers: ${err.message}`;
