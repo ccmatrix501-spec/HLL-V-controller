@@ -4,15 +4,15 @@ const express = require('express');
 const helmet = require('helmet');
 const session = require('express-session');
 const { rateLimit } = require('express-rate-limit');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 
 const IS_RAILWAY = Boolean(process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_ENVIRONMENT_ID);
 const PORT = Number(process.env.PORT || 8090);
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const RCON_BACKEND = process.env.RCON_BACKEND || (IS_RAILWAY
-  ? 'http://rcon.railway.internal:8080'
-  : 'http://rcon:8080');
+  ? 'http://hllv-rcon.railway.internal:8080'
+  : 'http://hllv-rcon:8080');
 const QPANEL_URL = process.env.QPANEL_URL || 'https://qp.qonzer.com/';
 const TRUST_PROXY = process.env.TRUST_PROXY !== undefined
   ? process.env.TRUST_PROXY === 'true'
@@ -20,6 +20,7 @@ const TRUST_PROXY = process.env.TRUST_PROXY !== undefined
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
   ? process.env.COOKIE_SECURE === 'true'
   : IS_RAILWAY;
+const RCON_PROXY_TIMEOUT_MS = Number(process.env.RCON_PROXY_TIMEOUT_MS || 65000);
 
 if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 10) {
   console.error('PANEL_PASSWORD must be set and at least 10 characters long.');
@@ -129,9 +130,12 @@ const rconProxy = createProxyMiddleware({
   target: RCON_BACKEND,
   changeOrigin: true,
   xfwd: true,
-  proxyTimeout: 25000,
-  timeout: 25000,
+  proxyTimeout: RCON_PROXY_TIMEOUT_MS,
+  timeout: RCON_PROXY_TIMEOUT_MS,
   on: {
+    // express.json() consumes the incoming request stream before the proxy sees it.
+    // Re-write the parsed JSON body onto the proxied request so FastAPI receives it.
+    proxyReq: fixRequestBody,
     error(err, req, res) {
       if (!res.headersSent) {
         res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -139,8 +143,8 @@ const rconProxy = createProxyMiddleware({
       res.end(JSON.stringify({
         error: `RCON backend unavailable: ${err.message}`,
         hint: IS_RAILWAY
-          ? 'Check that the Railway service is named rcon and is listening on port 8080.'
-          : 'Check that the rcon container/service is running.'
+          ? 'Check RCON_BACKEND and confirm the hllv-rcon Railway service is online on port 8080.'
+          : 'Check that the hllv-rcon service is running.'
       }));
     }
   }
@@ -163,6 +167,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`1st M.I. HLL Server Controller listening on port ${PORT}`);
   console.log(`Deployment: ${IS_RAILWAY ? 'Railway' : 'local'}`);
   console.log(`RCON backend: ${RCON_BACKEND}`);
+  console.log(`RCON proxy timeout: ${RCON_PROXY_TIMEOUT_MS}ms`);
 });
 
 function shutdown(signal) {
