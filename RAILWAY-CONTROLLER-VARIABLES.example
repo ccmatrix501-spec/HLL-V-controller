@@ -1,0 +1,13 @@
+# Paste these into the CONTROLLER service -> Variables -> Raw Editor.
+# Replace the placeholders before deploying.
+
+PANEL_PASSWORD=CHANGE-THIS-TO-YOUR-PRIVATE-CONTROLLER-PASSWORD
+SESSION_SECRET=CHANGE-THIS-TO-YOUR-PRIVATE-32-PLUS-CHARACTER-SECRET
+QPANEL_URL=https://qp.qonzer.com/
+
+# Optional. You can omit these because v2 detects Railway automatically.
+TRUST_PROXY=true
+COOKIE_SECURE=true
+
+# Optional if your private RCON service is named exactly "rcon".
+RCON_BACKEND=http://rcon.railway.internal:8080

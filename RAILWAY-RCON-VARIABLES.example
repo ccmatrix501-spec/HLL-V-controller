@@ -1,0 +1,7 @@
+# Paste these into the private rcon service -> Variables -> Raw Editor.
+# Do NOT generate a public domain for this service.
+
+HLL_SERVER_HOST=0.0.0.0
+HLL_SERVER_PORT=8080
+HLL_LOG_LEVEL=info
+HLL_LOG_FORMAT=text

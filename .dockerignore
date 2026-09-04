@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+.env.*
+node_modules
+npm-debug.log*
+RAILWAY-SETUP.md
+RAILWAY-CONTROLLER-VARIABLES.example
+RAILWAY-RCON-VARIABLES.example

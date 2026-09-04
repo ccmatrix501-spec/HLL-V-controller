@@ -1,0 +1,19 @@
+{
+  "name": "1stmi-hll-server-controller",
+  "version": "2.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "express-session": "^1.18.2",
+    "helmet": "^8.1.0",
+    "http-proxy-middleware": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

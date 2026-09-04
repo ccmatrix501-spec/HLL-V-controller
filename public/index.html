@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>1st M.I. | HLL Server Controller</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <section id="loginView" class="login-shell">
+    <div class="login-card">
+      <div class="brand-mark">1st M.I.</div>
+      <p class="eyebrow">HELL LET LOOSE</p>
+      <h1>Server Controller</h1>
+      <p class="muted">Secure command interface for server administration.</p>
+      <form id="loginForm" class="stack">
+        <label>Controller Password<input id="loginPassword" type="password" autocomplete="current-password" required /></label>
+        <button class="btn primary" type="submit">Enter Controller</button>
+      </form>
+      <p id="loginError" class="error"></p>
+    </div>
+  </section>
+
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark small">1st M.I.</div><div><strong>HLL CONTROL</strong><span>SERVER COMMAND</span></div></div>
+      <nav id="nav">
+        <button class="nav-item active" data-view="dashboard">Dashboard</button>
+        <button class="nav-item" data-view="players">Players</button>
+        <button class="nav-item" data-view="maps">Maps</button>
+        <button class="nav-item" data-view="access">Admins & VIPs</button>
+        <button class="nav-item" data-view="bans">Bans</button>
+        <button class="nav-item" data-view="settings">Settings</button>
+        <button class="nav-item" data-view="logs">Admin Logs</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button id="qpanelBtn" class="btn ghost full">Open Qonzer qPanel</button>
+        <button id="logoutBtn" class="btn danger-outline full">Log Out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow">1ST MOBILE INFANTRY</p><h2 id="pageTitle">Server Dashboard</h2></div>
+        <div class="top-actions"><span id="connectionPill" class="pill offline">RCON DISCONNECTED</span><button id="connectBtn" class="btn primary">Connect RCON</button></div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <div class="stats-grid">
+          <article class="stat"><span>Players</span><strong id="statPlayers">—</strong><small id="statPlayerSub">No connection</small></article>
+          <article class="stat"><span>Current Map</span><strong id="statMap">—</strong><small>Live session</small></article>
+          <article class="stat"><span>Next Map</span><strong id="statNextMap">—</strong><small>Rotation</small></article>
+          <article class="stat"><span>Time Remaining</span><strong id="statTime">—</strong><small>Match clock</small></article>
+        </div>
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">COMMAND</p><h3>Server Broadcast</h3></div></div>
+            <form id="broadcastForm" class="stack">
+              <textarea id="broadcastText" rows="5" maxlength="500" placeholder="Message all players..." required></textarea>
+              <button class="btn primary" type="submit">Send Broadcast</button>
+            </form>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">STATUS</p><h3>Live Session</h3></div><button class="btn ghost small" data-refresh="server">Refresh</button></div>
+            <pre id="sessionRaw" class="data-box">Connect RCON to load live server data.</pre>
+          </article>
+        </div>
+        <article class="panel warning-panel"><h3>Host-level controls</h3><p>Game process start / stop / restart remains in Qonzer qPanel. This controller is for HLL RCON administration.</p><button id="qpanelBtn2" class="btn ghost">Open qPanel</button></article>
+      </section>
+
+      <section id="players" class="view">
+        <div class="panel">
+          <div class="panel-head"><div><p class="eyebrow">LIVE ROSTER</p><h3>Players</h3></div><div class="inline"><input id="playerSearch" placeholder="Search player..."/><button class="btn ghost small" data-refresh="players">Refresh</button></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Player</th><th>Team</th><th>Unit / Role</th><th>Score / Ping</th><th>Actions</th></tr></thead><tbody id="playersBody"><tr><td colspan="5" class="empty">Connect RCON to load players.</td></tr></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="maps" class="view">
+        <div class="grid two">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">LIVE MAP</p><h3>Change Map</h3></div><button class="btn ghost small" data-refresh="maps">Refresh</button></div><form id="changeMapForm" class="stack"><label>Map<select id="mapSelect"><option value="">Load maps after connecting</option></select></label><button class="btn danger" type="submit">Change Map Now</button></form></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">ROTATION</p><h3>Current Rotation</h3></div></div><pre id="rotationBox" class="data-box">—</pre></article>
+        </div>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">SEQUENCE</p><h3>Map Sequence</h3></div></div><pre id="sequenceBox" class="data-box">—</pre></article>
+      </section>
+
+      <section id="access" class="view">
+        <div class="grid two">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">ACCESS</p><h3>VIPs</h3></div><button class="btn ghost small" data-refresh="access">Refresh</button></div><form id="vipForm" class="mini-form"><input id="vipId" placeholder="Player ID" required/><input id="vipComment" placeholder="Comment"/><button class="btn primary" type="submit">Add VIP</button></form><pre id="vipBox" class="data-box tall">—</pre></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">ACCESS</p><h3>Admins</h3></div></div><form id="adminForm" class="mini-form"><input id="adminId" placeholder="Player ID" required/><input id="adminGroup" placeholder="Admin group" required/><input id="adminComment" placeholder="Comment"/><button class="btn primary" type="submit">Add Admin</button></form><pre id="adminBox" class="data-box tall">—</pre></article>
+        </div>
+      </section>
+
+      <section id="bans" class="view">
+        <div class="grid two">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">MODERATION</p><h3>Temporary Bans</h3></div><button class="btn ghost small" data-refresh="bans">Refresh</button></div><pre id="tempBansBox" class="data-box tall">—</pre></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">MODERATION</p><h3>Permanent Bans</h3></div></div><pre id="permaBansBox" class="data-box tall">—</pre></article>
+        </div>
+        <article class="panel"><h3>Remove Ban</h3><form id="unbanForm" class="mini-form"><select id="unbanType"><option value="temp">Temporary</option><option value="perma">Permanent</option></select><input id="unbanId" placeholder="Player ID" required/><button class="btn danger-outline" type="submit">Remove Ban</button></form></article>
+      </section>
+
+      <section id="settings" class="view">
+        <div class="settings-grid">
+          <article class="panel setting-card"><h3>Welcome Message</h3><form class="setting-form" data-endpoint="/api/v2/welcome-message"><textarea name="message" rows="4" required placeholder="Server welcome message"></textarea><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>Maximum Queue</h3><form class="setting-form" data-endpoint="/api/v2/max-queued-players"><input type="number" name="max_queued_players" min="0" required placeholder="6"><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>VIP Slots</h3><form class="setting-form" data-endpoint="/api/v2/vip-slots"><input type="number" name="vip_slot_count" min="0" required placeholder="2"><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>Idle Kick</h3><form class="setting-form" data-endpoint="/api/v2/idle-kick-duration"><input type="number" name="idle_timeout_minutes" min="0" required placeholder="15"><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>High Ping</h3><form class="setting-form" data-endpoint="/api/v2/high-ping-threshold"><input type="number" name="high_ping_threshold_ms" min="0" required placeholder="250"><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>Team Switch Cooldown</h3><form class="setting-form" data-endpoint="/api/v2/team-switch-cooldown"><input type="number" name="team_switch_timer" min="0" required placeholder="5"><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>Auto Balance</h3><form class="setting-form" data-endpoint="/api/v2/auto-balance/enabled"><select name="enable"><option value="true">Enabled</option><option value="false">Disabled</option></select><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>Auto Balance Threshold</h3><form class="setting-form" data-endpoint="/api/v2/auto-balance/threshold"><input type="number" name="auto_balance_threshold" min="0" required placeholder="2"><button class="btn primary">Apply</button></form></article>
+          <article class="panel setting-card"><h3>Vote Kick</h3><form class="setting-form" data-endpoint="/api/v2/vote-kick/enabled"><select name="enable"><option value="true">Enabled</option><option value="false">Disabled</option></select><button class="btn primary">Apply</button></form></article>
+        </div>
+      </section>
+
+      <section id="logs" class="view">
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">AUDIT</p><h3>Admin Log</h3></div><div class="inline"><select id="logRange"><option value="3600">Last hour</option><option value="21600">6 hours</option><option value="86400">24 hours</option></select><button class="btn ghost small" data-refresh="logs">Refresh</button></div></div><pre id="logsBox" class="data-box log-box">—</pre></article>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="connectDialog">
+    <form id="connectForm" method="dialog" class="dialog-card">
+      <div class="panel-head"><div><p class="eyebrow">RCON V2</p><h3>Connect to HLL Server</h3></div><button type="button" class="icon-btn" data-close-dialog>×</button></div>
+      <p class="muted">Use the RCON IP/host, RCON port and RCON password from your server provider.</p>
+      <label>RCON Host / IP<input id="rconHost" required placeholder="123.45.67.89" /></label>
+      <label>RCON Port<input id="rconPort" type="number" min="1" max="65535" required placeholder="20300" /></label>
+      <label>RCON Password<input id="rconPassword" type="password" required autocomplete="off" /></label>
+      <div class="dialog-actions"><button type="button" class="btn ghost" data-close-dialog>Cancel</button><button class="btn primary" type="submit">Connect</button></div>
+      <p id="connectError" class="error"></p>
+    </form>
+  </dialog>
+
+  <dialog id="playerDialog">
+    <form id="playerActionForm" method="dialog" class="dialog-card">
+      <div class="panel-head"><div><p class="eyebrow">PLAYER CONTROL</p><h3 id="playerDialogTitle">Manage Player</h3></div><button type="button" class="icon-btn" data-close-player>×</button></div>
+      <input type="hidden" id="actionPlayerId" />
+      <input type="hidden" id="actionType" />
+      <label id="reasonLabel">Reason<input id="actionReason" placeholder="Reason" /></label>
+      <label id="messageLabel" class="hidden">Message<textarea id="actionMessage" rows="4"></textarea></label>
+      <label id="durationLabel" class="hidden">Duration (hours)<input id="actionDuration" type="number" min="1" value="24" /></label>
+      <label id="adminNameLabel" class="hidden">Admin Name<input id="actionAdminName" value="1st M.I. Admin" /></label>
+      <div id="forceModeLabel" class="hidden"><label>Switch mode<select id="actionForceMode"><option value="1">Immediately</option><option value="0">On death</option></select></label></div>
+      <div class="dialog-actions"><button type="button" class="btn ghost" data-close-player>Cancel</button><button id="playerActionSubmit" class="btn danger" type="submit">Confirm</button></div>
+    </form>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

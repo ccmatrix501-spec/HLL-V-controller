@@ -1,0 +1,24 @@
+services:
+  rcon:
+    image: ghcr.io/sledro/hllrcon:latest
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - hll-control
+
+  controller:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - rcon
+    env_file:
+      - .env
+    ports:
+      - "${CONTROLLER_PORT:-8090}:8090"
+    networks:
+      - hll-control
+
+networks:
+  hll-control:
+    driver: bridge
