@@ -20,7 +20,10 @@ const TRUST_PROXY = process.env.TRUST_PROXY !== undefined
 const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
   ? process.env.COOKIE_SECURE === 'true'
   : IS_RAILWAY;
-const RCON_PROXY_TIMEOUT_MS = Number(process.env.RCON_PROXY_TIMEOUT_MS || 65000);
+
+// 0 disables the controller-side RCON proxy timeout. This lets long HLL:V
+// RCON operations finish instead of the website cutting them off first.
+const RCON_PROXY_TIMEOUT_MS = Number(process.env.RCON_PROXY_TIMEOUT_MS || 0);
 
 if (!PANEL_PASSWORD || PANEL_PASSWORD.length < 10) {
   console.error('PANEL_PASSWORD must be set and at least 10 characters long.');
@@ -120,8 +123,6 @@ app.get('/controller/status', (req, res) => {
   });
 });
 
-// Railway should only use this endpoint to determine whether the controller itself is alive.
-// RCON availability is intentionally not part of the deployment healthcheck.
 app.get('/controller/health', (req, res) => {
   res.json({ ok: true, service: '1stmi-hll-controller' });
 });
@@ -133,8 +134,7 @@ const rconProxy = createProxyMiddleware({
   proxyTimeout: RCON_PROXY_TIMEOUT_MS,
   timeout: RCON_PROXY_TIMEOUT_MS,
   on: {
-    // express.json() consumes the incoming request stream before the proxy sees it.
-    // Re-write the parsed JSON body onto the proxied request so FastAPI receives it.
+    // express.json() consumes the incoming body. Restore it for FastAPI.
     proxyReq: fixRequestBody,
     error(err, req, res) {
       if (!res.headersSent) {
@@ -167,8 +167,13 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`1st M.I. HLL Server Controller listening on port ${PORT}`);
   console.log(`Deployment: ${IS_RAILWAY ? 'Railway' : 'local'}`);
   console.log(`RCON backend: ${RCON_BACKEND}`);
-  console.log(`RCON proxy timeout: ${RCON_PROXY_TIMEOUT_MS}ms`);
+  console.log(`RCON proxy timeout: ${RCON_PROXY_TIMEOUT_MS === 0 ? 'disabled' : `${RCON_PROXY_TIMEOUT_MS}ms`}`);
 });
+
+// Disable Node's request-duration cutoff for long RCON operations. Header parsing
+// remains protected by Node's normal header handling; this only removes the request
+// body/response duration limit once a valid request has arrived.
+server.requestTimeout = 0;
 
 function shutdown(signal) {
   console.log(`${signal} received. Closing HTTP server...`);
