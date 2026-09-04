@@ -26,15 +26,13 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
 const RCON_PROXY_TIMEOUT_MS = 0;
 
 // Repeat jobs run on the controller, not in the browser, so they continue when the
-// controller page is closed. Mount a Railway volume and set SCHEDULER_FILE to a path
-// on that volume if you also want jobs to survive service redeployments/restarts.
-const SCHEDULER_FILE = process.env.SCHEDULER_FILE || path.join(process.cwd(), 'repeat-jobs.json');
+// controller page is closed. Set SCHEDULER_FILE to a Railway volume path such as
+// /data/repeat-jobs.json if you want jobs to survive deployments/restarts too.
+const SCHEDULER_FILE = process.env.SCHEDULER_FILE || '/tmp/1stmi-hllv-repeat-jobs.json';
 const MIN_REPEAT_INTERVAL_SECONDS = Math.max(10, Number(process.env.MIN_REPEAT_INTERVAL_SECONDS || 30));
 const MAX_REPEAT_INTERVAL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_REPEAT_JOBS = 100;
 
-// This controller is intentionally restricted to the exact HLL:V map pool used by
-// the server's MapRotation.ini.
 const HLLV_ALLOWED_MAPS = Object.freeze([
   'wdeva_offensivenva_day',
   'wdeva_offensiveus_day',
@@ -157,7 +155,6 @@ app.get('/controller/health', (req, res) => {
 
 // ---------- Repeat scheduler ----------
 let repeatJobs = [];
-let repeatTickerBusy = false;
 
 function publicRepeatJob(job) {
   return {
@@ -254,8 +251,6 @@ async function executeRepeatJob(job) {
     }
   } catch (err) {
     job.last_error = err?.message || String(err);
-    // Keep the job active and retry at its next normal interval. This is useful if
-    // RCON is briefly disconnected or the game is changing map.
     job.next_run_at = new Date(Date.now() + job.interval_seconds * 1000).toISOString();
     console.warn(`Repeat job ${job.id} failed: ${job.last_error}`);
   } finally {
@@ -264,16 +259,13 @@ async function executeRepeatJob(job) {
   }
 }
 
-async function processRepeatJobs() {
-  if (repeatTickerBusy) return;
-  repeatTickerBusy = true;
-  try {
-    const now = Date.now();
-    const due = repeatJobs.filter(job => job.active && !job.running && job.next_run_at && Date.parse(job.next_run_at) <= now);
-    // Execute independently so one slow message does not block other timers.
-    await Promise.allSettled(due.map(executeRepeatJob));
-  } finally {
-    repeatTickerBusy = false;
+function processRepeatJobs() {
+  const now = Date.now();
+  const due = repeatJobs.filter(job => job.active && !job.running && job.next_run_at && Date.parse(job.next_run_at) <= now);
+  // Fire each due job independently. Because RCON timeouts are intentionally disabled,
+  // one unusually slow command must never freeze every other repeat timer.
+  for (const job of due) {
+    executeRepeatJob(job).catch(err => console.warn(`Repeat job worker failed: ${err?.message || err}`));
   }
 }
 
@@ -290,7 +282,7 @@ app.get('/controller/repeat-jobs', requireAuth, (req, res) => {
   });
 });
 
-app.post('/controller/repeat-jobs', requireAuth, async (req, res) => {
+app.post('/controller/repeat-jobs', requireAuth, (req, res) => {
   if (repeatJobs.length >= MAX_REPEAT_JOBS) {
     return res.status(400).json({ error: `Maximum of ${MAX_REPEAT_JOBS} repeat jobs reached.` });
   }
@@ -337,7 +329,6 @@ app.post('/controller/repeat-jobs', requireAuth, async (req, res) => {
 
   repeatJobs.push(job);
   persistRepeatJobs();
-  // Do not make the browser wait on a slow RCON send. The scheduler will execute it.
   setImmediate(processRepeatJobs);
   return res.status(201).json({ ok: true, job: publicRepeatJob(job) });
 });
