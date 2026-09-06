@@ -1,0 +1,56 @@
+.host-control-panel {
+  border-color: rgba(212, 174, 84, .26);
+}
+
+.host-control-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  color: #d6cfb4;
+  background: rgba(255,255,255,.035);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.host-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.host-control-actions .btn {
+  min-width: 150px;
+}
+
+.host-control-actions .btn:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+.host-control-message {
+  margin: 14px 0 0;
+  color: #aeb5aa;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.host-control-error {
+  color: #e46b66;
+}
+
+@media (max-width: 720px) {
+  .host-control-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .host-control-actions .btn {
+    width: 100%;
+  }
+}
