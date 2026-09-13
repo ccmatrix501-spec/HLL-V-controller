@@ -53,9 +53,9 @@
         return `Match ended: ${entry.map_name || ''} — Allies ${entry.allied_score ?? '?'} / Axis ${entry.axis_score ?? '?'}`;
       case 'ADMIN CAMERA':
       case 'VOTE KICK':
-        return entry.message || t;
+        return entry.raw_message || t;
       default:
-        return entry.message || entry.log_class || 'Admin log event';
+        return entry.raw_message || entry.message || entry.log_class || 'Admin log event';
     }
   }
 
@@ -160,21 +160,22 @@
     }
 
     rows.innerHTML = filtered.map((entry) => {
-      const type = entry.type || 'OTHER';
-      const raw = entry.message || '';
+      const eventType = entry.type || 'OTHER';
+      const raw = entry.raw_message || '';
+      const friendly = summary(entry);
       const details = Object.entries(entry)
-        .filter(([key, value]) => !['timestamp', 'type', 'message', 'log_class'].includes(key) && value !== null && value !== undefined && value !== '')
+        .filter(([key, value]) => !['timestamp', 'type', 'raw_message', 'log_class'].includes(key) && value !== null && value !== undefined && value !== '')
         .map(([key, value]) => `<span><b>${esc(key.replaceAll('_', ' '))}:</b> ${esc(value)}</span>`)
         .join('');
       return `
-        <article class="admin-log-row log-${typeClass(type)}">
+        <article class="admin-log-row log-${typeClass(eventType)}">
           <div class="admin-log-meta">
-            <span class="admin-log-badge">${esc(type)}</span>
+            <span class="admin-log-badge">${esc(eventType)}</span>
             <time>${esc(localTime(entry.timestamp))}</time>
           </div>
-          <div class="admin-log-summary">${esc(summary(entry))}</div>
+          <div class="admin-log-summary">${esc(friendly)}</div>
           ${details ? `<div class="admin-log-details">${details}</div>` : ''}
-          ${raw && raw !== summary(entry) ? `<details><summary>Raw event</summary><code>${esc(raw)}</code></details>` : ''}
+          ${raw && raw !== friendly ? `<details><summary>Raw event</summary><code>${esc(raw)}</code></details>` : ''}
         </article>`;
     }).join('');
   }
