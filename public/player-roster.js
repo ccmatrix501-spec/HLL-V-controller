@@ -26,6 +26,8 @@
     20: 'Commander'
   };
 
+  const sortState = { key: 'name', direction: 'asc' };
+
   function pick(obj, keys, fallback = undefined) {
     for (const key of keys) {
       if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== '') return obj[key];
@@ -35,6 +37,10 @@
 
   function playerKey(player) {
     return String(pick(player, ['id', 'ID', 'player_id', 'PlayerId', 'playerId', 'eosId', 'eos_id', 'steam_id_64', 'SteamID64', 'platform_id', 'PlatformId'], '')).trim();
+  }
+
+  function playerName(player) {
+    return String(pick(player, ['name', 'Name', 'player_name', 'PlayerName'], 'Unknown Player'));
   }
 
   function sideFor(player) {
@@ -54,6 +60,14 @@
     const raw = pick(player, ['factionId', 'faction_id', 'teamId', 'team_id', 'team', 'Team']);
     const id = Number(raw);
     return Number.isFinite(id) && Object.prototype.hasOwnProperty.call(FACTIONS, id) ? FACTIONS[id] : '—';
+  }
+
+  function unitFor(player) {
+    const raw = pick(player, ['platoon', 'Platoon', 'unit', 'Unit', 'squad', 'Squad'], '—');
+    if (raw && typeof raw === 'object') {
+      return String(pick(raw, ['name', 'Name', 'id', 'Id'], '—'));
+    }
+    return String(raw ?? '—');
   }
 
   function roleFor(player) {
@@ -86,8 +100,41 @@
       .hllv-side.us { background:rgba(57,106,170,.16); border-color:rgba(89,137,198,.55); }
       .hllv-side.nva { background:rgba(152,58,48,.16); border-color:rgba(188,75,61,.55); }
       .hllv-side.unassigned, .hllv-side.unknown { opacity:.72; }
+      .roster-sort-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+      .roster-sort-controls select { min-width:120px; }
+      .roster-sort-direction { min-width:42px; }
     `;
     document.head.appendChild(style);
+  }
+
+  function installSortControls() {
+    if (document.querySelector('#playerSortBy')) return;
+    const search = document.querySelector('#playerSearch');
+    if (!search) return;
+    const parent = search.parentElement;
+    if (!parent) return;
+
+    const controls = document.createElement('div');
+    controls.className = 'roster-sort-controls';
+    controls.innerHTML = `
+      <select id="playerSortBy" title="Sort players">
+        <option value="name">Sort: Name</option>
+        <option value="side">Sort: Side</option>
+        <option value="unit">Sort: Unit</option>
+        <option value="role">Sort: Role</option>
+      </select>
+      <button id="playerSortDirection" type="button" class="btn ghost small roster-sort-direction" title="Reverse sort">A→Z</button>`;
+    parent.insertBefore(controls, search);
+
+    controls.querySelector('#playerSortBy').addEventListener('change', event => {
+      sortState.key = event.target.value;
+      renderPlayers();
+    });
+    controls.querySelector('#playerSortDirection').addEventListener('click', event => {
+      sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+      event.currentTarget.textContent = sortState.direction === 'asc' ? 'A→Z' : 'Z→A';
+      renderPlayers();
+    });
   }
 
   function sideClass(side) {
@@ -98,14 +145,30 @@
     return 'unknown';
   }
 
-  // Replace the original roster renderer. HLL:V returns factionId rather than a
-  // friendly `team` string, which is why the Team column previously showed an em dash.
+  function sortValue(player, key) {
+    if (key === 'side') return sideFor(player);
+    if (key === 'unit') return unitFor(player);
+    if (key === 'role') return roleFor(player);
+    return playerName(player);
+  }
+
+  function comparePlayers(a, b) {
+    const av = String(sortValue(a, sortState.key) || '').toLocaleLowerCase();
+    const bv = String(sortValue(b, sortState.key) || '').toLocaleLowerCase();
+    const result = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+    if (result !== 0) return sortState.direction === 'asc' ? result : -result;
+    return playerName(a).localeCompare(playerName(b), undefined, { numeric: true, sensitivity: 'base' });
+  }
+
   renderPlayers = function renderPlayersHllv(error = '') {
     installRosterStyles();
+    installSortControls();
     const search = document.querySelector('#playerSearch');
     const q = (search?.value || '').trim().toLowerCase();
     const players = Array.isArray(state.players) ? state.players : [];
-    const rows = players.filter(player => JSON.stringify(player).toLowerCase().includes(q));
+    const rows = players
+      .filter(player => JSON.stringify(player).toLowerCase().includes(q))
+      .sort(comparePlayers);
     const body = document.querySelector('#playersBody');
     if (!body) return;
 
@@ -122,9 +185,9 @@
     body.innerHTML = '';
     for (const player of rows) {
       const id = playerKey(player);
-      const name = String(pick(player, ['name', 'Name', 'player_name', 'PlayerName'], 'Unknown Player'));
+      const name = playerName(player);
       const side = sideFor(player);
-      const unit = pick(player, ['platoon', 'Platoon', 'unit', 'Unit', 'squad', 'Squad'], '—');
+      const unit = unitFor(player);
       const role = roleFor(player);
       const score = scoreFor(player);
       const ping = pick(player, ['ping', 'Ping']);
@@ -154,6 +217,8 @@
     }
   };
 
-  // Re-render immediately if players were already loaded before this enhancement ran.
+  installRosterStyles();
+  installSortControls();
+  document.querySelector('#playerSearch')?.addEventListener('input', () => renderPlayers());
   if (Array.isArray(state.players) && state.players.length) renderPlayers();
 })();
