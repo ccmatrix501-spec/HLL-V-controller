@@ -22,30 +22,20 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
   ? process.env.COOKIE_SECURE === 'true'
   : IS_RAILWAY;
 
-// The controller does not impose an artificial timeout on valid RCON operations.
 const RCON_PROXY_TIMEOUT_MS = 0;
 
-// Repeat jobs run on the controller, not in the browser, so they continue when the
-// controller page is closed. Set SCHEDULER_FILE to a Railway volume path such as
-// /data/repeat-jobs.json if you want jobs to survive deployments/restarts too.
 const SCHEDULER_FILE = process.env.SCHEDULER_FILE || '/tmp/1stmi-hllv-repeat-jobs.json';
 const MIN_REPEAT_INTERVAL_SECONDS = Math.max(10, Number(process.env.MIN_REPEAT_INTERVAL_SECONDS || 30));
 const MAX_REPEAT_INTERVAL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_REPEAT_JOBS = 100;
 
 const HLLV_ALLOWED_MAPS = Object.freeze([
-  'wdeva_offensivenva_day',
-  'wdeva_offensiveus_day',
-  'wdevb_offensivenva_day',
-  'wdevb_offensiveus_day',
-  'wdevc_offensivenva_day',
-  'wdevc_offensiveus_day',
-  'wdevd_offensivenva_day',
-  'wdevd_offensiveus_day',
-  'wdeve_offensivenva_day',
-  'wdeve_offensiveus_day',
-  'wdevf_offensivenva_day',
-  'wdevf_offensiveus_day'
+  'wdeva_warfare_day','wdeva_offensivenva_day','wdeva_offensiveus_day','wdeva_domination_day','wdeva_conquest_day',
+  'wdevb_warfare_day','wdevb_offensivenva_day','wdevb_offensiveus_day','wdevb_domination_day','wdevb_conquest_day',
+  'wdevc_warfare_day','wdevc_offensivenva_day','wdevc_offensiveus_day','wdevc_domination_day','wdevc_conquest_day',
+  'wdevd_warfare_day','wdevd_offensivenva_day','wdevd_offensiveus_day','wdevd_domination_day','wdevd_conquest_day',
+  'wdeve_warfare_day','wdeve_offensivenva_day','wdeve_offensiveus_day','wdeve_domination_day','wdeve_conquest_day',
+  'wdevf_warfare_day','wdevf_offensivenva_day','wdevf_offensiveus_day','wdevf_domination_day','wdevf_conquest_day'
 ]);
 const HLLV_ALLOWED_MAP_SET = new Set(HLLV_ALLOWED_MAPS);
 
@@ -153,7 +143,6 @@ app.get('/controller/health', (req, res) => {
   res.json({ ok: true, service: '1stmi-hll-controller' });
 });
 
-// ---------- Repeat scheduler ----------
 let repeatJobs = [];
 
 function publicRepeatJob(job) {
@@ -262,8 +251,6 @@ async function executeRepeatJob(job) {
 function processRepeatJobs() {
   const now = Date.now();
   const due = repeatJobs.filter(job => job.active && !job.running && job.next_run_at && Date.parse(job.next_run_at) <= now);
-  // Fire each due job independently. Because RCON timeouts are intentionally disabled,
-  // one unusually slow command must never freeze every other repeat timer.
   for (const job of due) {
     executeRepeatJob(job).catch(err => console.warn(`Repeat job worker failed: ${err?.message || err}`));
   }
@@ -333,6 +320,41 @@ app.post('/controller/repeat-jobs', requireAuth, (req, res) => {
   return res.status(201).json({ ok: true, job: publicRepeatJob(job) });
 });
 
+app.patch('/controller/repeat-jobs/:id', requireAuth, (req, res) => {
+  const job = repeatJobs.find(item => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: 'Repeat job not found' });
+  if (job.running) return res.status(409).json({ error: 'This repeat job is currently sending. Try editing it again in a moment.' });
+
+  const message = req.body?.message !== undefined ? String(req.body.message).trim() : job.message;
+  const intervalSeconds = req.body?.interval_seconds !== undefined ? Number(req.body.interval_seconds) : Number(job.interval_seconds);
+  const remainingSends = req.body?.remaining_sends !== undefined
+    ? Number(req.body.remaining_sends)
+    : (job.repeat_count === 0 ? 0 : Math.max(0, Number(job.repeat_count) - Number(job.sent_count || 0)));
+  const sendImmediately = req.body?.send_immediately === true;
+
+  if (!message) return res.status(400).json({ error: 'message is required' });
+  if (message.length > 500) return res.status(400).json({ error: 'message cannot exceed 500 characters' });
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds < MIN_REPEAT_INTERVAL_SECONDS || intervalSeconds > MAX_REPEAT_INTERVAL_SECONDS) {
+    return res.status(400).json({ error: `interval_seconds must be between ${MIN_REPEAT_INTERVAL_SECONDS} and ${MAX_REPEAT_INTERVAL_SECONDS}` });
+  }
+  if (!Number.isInteger(remainingSends) || remainingSends < 0 || remainingSends > 10000) {
+    return res.status(400).json({ error: 'remaining_sends must be 0 (forever) or an integer from 1 to 10000' });
+  }
+
+  job.message = message;
+  job.interval_seconds = Math.round(intervalSeconds);
+  job.repeat_count = remainingSends === 0 ? 0 : Number(job.sent_count || 0) + remainingSends;
+  job.active = true;
+  job.last_error = null;
+  job.next_run_at = sendImmediately
+    ? new Date().toISOString()
+    : new Date(Date.now() + job.interval_seconds * 1000).toISOString();
+
+  persistRepeatJobs();
+  if (sendImmediately) setImmediate(processRepeatJobs);
+  return res.json({ ok: true, job: publicRepeatJob(job) });
+});
+
 app.post('/controller/repeat-jobs/:id/run-now', requireAuth, (req, res) => {
   const job = repeatJobs.find(item => item.id === req.params.id);
   if (!job) return res.status(404).json({ error: 'Repeat job not found' });
@@ -357,7 +379,6 @@ app.delete('/controller/repeat-jobs', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- HLL:V map restrictions ----------
 app.get('/api/v2/maps', requireAuth, (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(HLLV_ALLOWED_MAPS);
