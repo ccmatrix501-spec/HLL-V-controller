@@ -75,7 +75,7 @@
       <section id="players" class="view">
         <div class="panel">
           <div class="panel-head"><div><p class="eyebrow">LIVE ROSTER</p><h3>Players</h3></div><div class="inline"><input id="playerSearch" placeholder="Search player..."/><button class="btn ghost small" data-refresh="players">Refresh</button></div></div>
-          <div class="table-wrap"><table><thead><tr><th>Player</th><th>Team</th><th>Unit / Role</th><th>Score / Ping</th><th>Actions</th></tr></thead><tbody id="playersBody"><tr><td colspan="5" class="empty">Connect RCON to load players.</td></tr></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Player</th><th>Side</th><th>Unit / Role</th><th>Score / Ping</th><th>Actions</th></tr></thead><tbody id="playersBody"><tr><td colspan="5" class="empty">Connect RCON to load players.</td></tr></tbody></table></div>
         </div>
       </section>
 
@@ -149,6 +149,7 @@
   </dialog>
 
   <script src="/app.js" defer></script>
+  <script src="/player-roster.js" defer></script>
   <script src="/live-summary.js" defer></script>
   <script src="/repeats.js" defer></script>
   <script src="/map-manager.js" defer></script>
