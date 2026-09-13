@@ -35,11 +35,15 @@
     return output;
   }
 
+  function setTextIfChanged(el, value) {
+    if (el && el.textContent !== value) el.textContent = value;
+  }
+
   function patchSelect(select) {
     if (!select) return;
     for (const option of select.options) {
       const value = String(option.value || '').toLowerCase();
-      if (/^wdev[a-f]_/.test(value)) option.textContent = labelFor(value);
+      if (/^wdev[a-f]_/.test(value)) setTextIfChanged(option, labelFor(value));
     }
   }
 
@@ -49,7 +53,7 @@
       const strong = item.querySelector('strong');
       if (!small || !strong) return;
       const id = small.textContent.trim().toLowerCase();
-      if (/^wdev[a-f]_/.test(id)) strong.textContent = labelFor(id);
+      if (/^wdev[a-f]_/.test(id)) setTextIfChanged(strong, labelFor(id));
     });
   }
 
@@ -58,7 +62,7 @@
       const el = document.querySelector(selector);
       if (!el) continue;
       const raw = String(el.textContent || '').trim().toLowerCase();
-      if (/^wdev[a-f]_/.test(raw)) el.textContent = labelFor(raw);
+      if (/^wdev[a-f]_/.test(raw)) setTextIfChanged(el, labelFor(raw));
     }
   }
 
@@ -81,7 +85,15 @@
 
   function install() {
     patchAll();
-    const observer = new MutationObserver(() => patchAll());
+    let scheduled = false;
+    const observer = new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        patchAll();
+      });
+    });
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     setInterval(patchSummary, 1500);
   }
