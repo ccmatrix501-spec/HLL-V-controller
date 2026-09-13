@@ -16,6 +16,17 @@
     return Math.round(n * 60);
   }
 
+  function intervalParts(seconds) {
+    const n = Number(seconds || 0);
+    if (n > 0 && n % 3600 === 0) return { value: n / 3600, unit: 'hours' };
+    if (n > 0 && n % 60 === 0) return { value: n / 60, unit: 'minutes' };
+    return { value: Math.max(1, n), unit: 'seconds' };
+  }
+
+  async function patch(url, body) {
+    return request(url, { method: 'PATCH', body: JSON.stringify(body) });
+  }
+
   function makeRepeatControls(prefix, title) {
     const box = document.createElement('div');
     box.className = 'repeat-control';
@@ -187,6 +198,73 @@
     });
   }
 
+  function installEditDialog() {
+    if (document.querySelector('#repeatEditDialog')) return;
+    const dialog = document.createElement('dialog');
+    dialog.id = 'repeatEditDialog';
+    dialog.innerHTML = `
+      <form id="repeatEditForm" method="dialog" class="dialog-card">
+        <div class="panel-head"><div><p class="eyebrow">REPEAT TIMER</p><h3>Edit Active Message</h3></div><button id="repeatEditClose" type="button" class="icon-btn">×</button></div>
+        <input id="repeatEditId" type="hidden" />
+        <label>Message<textarea id="repeatEditMessage" rows="7" maxlength="500" required></textarea></label>
+        <div class="repeat-grid">
+          <label>Every<input id="repeatEditEvery" type="number" min="1" step="1" required /></label>
+          <label>Interval<select id="repeatEditUnit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="seconds">Seconds</option></select></label>
+          <label>Future sends<input id="repeatEditRemaining" type="number" min="0" max="10000" step="1" value="0" /><small>0 = continue forever</small></label>
+          <label class="repeat-check"><input id="repeatEditSendNow" type="checkbox" /><span>Send updated message immediately</span></label>
+        </div>
+        <p class="muted" style="margin:0">Saving changes keeps the existing timer and sent count. The next normal send is recalculated from when you save.</p>
+        <div class="dialog-actions"><button id="repeatEditCancel" type="button" class="btn ghost">Cancel</button><button id="repeatEditSave" type="submit" class="btn primary">Save Changes</button></div>
+      </form>`;
+    document.body.appendChild(dialog);
+
+    const close = () => dialog.close();
+    dialog.querySelector('#repeatEditClose').addEventListener('click', close);
+    dialog.querySelector('#repeatEditCancel').addEventListener('click', close);
+    dialog.querySelector('#repeatEditForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      const id = dialog.querySelector('#repeatEditId').value;
+      const message = dialog.querySelector('#repeatEditMessage').value.trim();
+      const seconds = intervalSeconds(dialog.querySelector('#repeatEditEvery').value, dialog.querySelector('#repeatEditUnit').value);
+      const remaining = Number(dialog.querySelector('#repeatEditRemaining').value || 0);
+      const sendNow = dialog.querySelector('#repeatEditSendNow').checked;
+      const button = dialog.querySelector('#repeatEditSave');
+      button.disabled = true;
+      button.textContent = 'Saving...';
+      try {
+        await patch(`/controller/repeat-jobs/${encodeURIComponent(id)}`, {
+          message,
+          interval_seconds: seconds,
+          remaining_sends: remaining,
+          send_immediately: sendNow
+        });
+        dialog.close();
+        toast('Repeat timer updated.');
+        await loadRepeatJobs();
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Save Changes';
+      }
+    });
+  }
+
+  function openEditJob(job) {
+    installEditDialog();
+    const dialog = document.querySelector('#repeatEditDialog');
+    const parts = intervalParts(job.interval_seconds);
+    dialog.querySelector('#repeatEditId').value = job.id;
+    dialog.querySelector('#repeatEditMessage').value = job.message || '';
+    dialog.querySelector('#repeatEditEvery').value = String(parts.value);
+    dialog.querySelector('#repeatEditUnit').value = parts.unit;
+    dialog.querySelector('#repeatEditRemaining').value = job.repeat_count === 0
+      ? '0'
+      : String(Math.max(0, Number(job.repeat_count || 0) - Number(job.sent_count || 0)));
+    dialog.querySelector('#repeatEditSendNow').checked = false;
+    dialog.showModal();
+  }
+
   function formatInterval(seconds) {
     if (seconds % 3600 === 0) {
       const n = seconds / 3600;
@@ -269,6 +347,14 @@
       const actions = document.createElement('div');
       actions.className = 'repeat-job-actions';
       if (job.active) {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'btn ghost small';
+        edit.textContent = 'Edit';
+        edit.disabled = Boolean(job.running);
+        edit.addEventListener('click', () => openEditJob(job));
+        actions.appendChild(edit);
+
         const now = document.createElement('button');
         now.type = 'button';
         now.className = 'btn ghost small';
@@ -314,6 +400,7 @@
   installBroadcastRepeat();
   installPlayerRepeat();
   installJobsPanel();
+  installEditDialog();
   loadRepeatJobs();
   setInterval(loadRepeatJobs, 5000);
 })();
