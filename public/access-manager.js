@@ -75,9 +75,25 @@
     });
   }
 
+  function loadAdminLogViewerAssets() {
+    if (!document.querySelector('link[href="/admin-logs.css"]')) {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = '/admin-logs.css';
+      document.head.appendChild(css);
+    }
+    if (!document.querySelector('script[src="/admin-logs.js"]')) {
+      const script = document.createElement('script');
+      script.src = '/admin-logs.js';
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+  }
+
   function install() {
     addRemoveForm('vipForm', 'vips', 'VIP');
     addRemoveForm('adminForm', 'admins', 'Admin');
+    loadAdminLogViewerAssets();
   }
 
   if (document.readyState === 'loading') {
