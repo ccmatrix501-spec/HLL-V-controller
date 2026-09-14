@@ -26,6 +26,22 @@
     });
   }
 
+  function isAdminCameraEvent(entry) {
+    const type = String(entry?.type || '').toUpperCase();
+    if (type === 'ADMIN CAMERA') return true;
+
+    const haystack = [
+      entry?.log_class,
+      entry?.raw_message,
+      entry?.message
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return haystack.includes('admincamera') ||
+      haystack.includes('admin camera') ||
+      haystack.includes('entered admin camera') ||
+      haystack.includes('left admin camera');
+  }
+
   function summary(entry) {
     const t = entry.type || 'OTHER';
     switch (t) {
@@ -51,7 +67,6 @@
         return `Match started: ${entry.map_name || ''} ${entry.game_mode_id || ''}`.trim();
       case 'MATCH END':
         return `Match ended: ${entry.map_name || ''} — Allies ${entry.allied_score ?? '?'} / Axis ${entry.axis_score ?? '?'}`;
-      case 'ADMIN CAMERA':
       case 'VOTE KICK':
         return entry.raw_message || t;
       default:
@@ -85,7 +100,6 @@
           <option value="MATCH START">Match start</option>
           <option value="MATCH END">Match end</option>
           <option value="VOTE KICK">Vote kicks</option>
-          <option value="ADMIN CAMERA">Admin camera</option>
           <option value="OTHER">Other</option>
         </select>
         <label class="admin-log-auto"><input id="adminLogAuto" type="checkbox" checked /> Live refresh</label>
@@ -128,7 +142,7 @@
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
       if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
-      entries = Array.isArray(data?.entries) ? data.entries : [];
+      entries = (Array.isArray(data?.entries) ? data.entries : []).filter(entry => !isAdminCameraEvent(entry));
       // hllrcon returns oldest first; admin work is easier with newest first.
       entries.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
       render();
@@ -148,6 +162,7 @@
     const type = $('#adminLogType')?.value || 'ALL';
 
     const filtered = entries.filter((entry) => {
+      if (isAdminCameraEvent(entry)) return false;
       if (type !== 'ALL' && String(entry.type || 'OTHER') !== type) return false;
       if (!query) return true;
       return JSON.stringify(entry).toLowerCase().includes(query);
