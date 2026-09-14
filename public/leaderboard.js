@@ -163,7 +163,7 @@
     });
 
     if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty">No matching tracked players.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No tracked player statistics yet.</td></tr>';
       return;
     }
 
@@ -194,20 +194,31 @@
     renderTable();
   }
 
+  function renderLoadError(error) {
+    const message = esc(error?.message || error || 'Unable to load leaderboard.');
+    ['#leaderTopKills', '#leaderTopRevives', '#leaderTopKd'].forEach(selector => {
+      const box = $(selector);
+      if (box) box.innerHTML = `<div class="leaderboard-empty error">Unable to load: ${message}</div>`;
+    });
+    const tbody = $('#leaderTableBody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty error">${message}</td></tr>`;
+  }
+
   async function load() {
     if (loading) return;
     loading = true;
     try {
+      // Leaderboard lives outside /player-stats/{player_id}; otherwise FastAPI's
+      // dynamic player route treats the word "leaderboard" as an actual player ID.
       const [all, leaders] = await Promise.all([
         api('/api/v2/player-stats?limit=1000'),
-        api('/api/v2/player-stats/leaderboard?limit=5')
+        api('/api/v2/leaderboard?limit=5')
       ]);
       players = Array.isArray(all?.players) ? all.players : [];
       board = leaders || {};
       render();
     } catch (error) {
-      const tbody = $('#leaderTableBody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty error">${esc(error.message || error)}</td></tr>`;
+      renderLoadError(error);
     } finally {
       loading = false;
     }
