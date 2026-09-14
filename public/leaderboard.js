@@ -28,7 +28,8 @@
   function kd(player) {
     const kills = Math.max(0, Number(player?.kills || 0));
     const deaths = Math.max(0, Number(player?.deaths || 0));
-    return deaths === 0 ? kills : kills / deaths;
+    if (deaths === 0) return kills;
+    return kills / deaths;
   }
 
   function kdText(player) {
@@ -52,6 +53,34 @@
     return date.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
   }
 
+  function buildBoardFromSavedStats(source) {
+    const rows = (Array.isArray(source) ? source : []).map(player => ({ ...player }));
+    for (const row of rows) {
+      row.kills = Math.max(0, Number(row.kills || 0));
+      row.deaths = Math.max(0, Number(row.deaths || 0));
+      row.revives = Math.max(0, Number(row.revives || 0));
+      row.kd = kd(row);
+      row.kd_display = kdText(row);
+    }
+
+    const byName = (a, b) => String(a.player_name || '').localeCompare(String(b.player_name || ''));
+    const topKills = [...rows].sort((a, b) => (b.kills - a.kills) || (a.deaths - b.deaths) || byName(a, b)).slice(0, 5);
+    const topRevives = [...rows].sort((a, b) => (b.revives - a.revives) || (b.kills - a.kills) || byName(a, b)).slice(0, 5);
+    const minKdKills = 10;
+    const topKd = rows
+      .filter(row => row.kills >= minKdKills)
+      .sort((a, b) => (b.kd - a.kd) || (b.kills - a.kills) || (a.deaths - b.deaths) || byName(a, b))
+      .slice(0, 5);
+
+    return {
+      top_kills: topKills,
+      top_revives: topRevives,
+      top_kd: topKd,
+      tracked_players: rows.length,
+      min_kd_kills: minKdKills
+    };
+  }
+
   function addNavAndView() {
     if (!$('#leaderboard')) {
       const section = document.createElement('section');
@@ -62,7 +91,7 @@
           <div>
             <p class="eyebrow">SERVER RECORDS</p>
             <h3>Player Stats Leaderboard</h3>
-            <p class="muted">Persistent totals recorded on this HLL:V server.</p>
+            <p class="muted">Uses the existing persistent stats already saved for players on this HLL:V server.</p>
           </div>
           <div class="leaderboard-command-help">
             <strong>In-game commands</strong>
@@ -95,7 +124,7 @@
                 <th>Favourite Vehicle</th>
                 <th><button data-leader-sort="last_seen">Last Seen</button></th>
               </tr></thead>
-              <tbody id="leaderTableBody"><tr><td colspan="9" class="empty">Loading player stats…</td></tr></tbody>
+              <tbody id="leaderTableBody"><tr><td colspan="9" class="empty">Loading saved player stats…</td></tr></tbody>
             </table>
           </div>
         </article>`;
@@ -125,7 +154,7 @@
     const box = $(selector);
     if (!box) return;
     if (!rows?.length) {
-      box.innerHTML = '<div class="leaderboard-empty">No data yet.</div>';
+      box.innerHTML = '<div class="leaderboard-empty">No saved data yet.</div>';
       return;
     }
     box.innerHTML = rows.slice(0, 5).map((row, index) => {
@@ -163,7 +192,7 @@
     });
 
     if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty">No tracked player statistics yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No saved player stats found yet.</td></tr>';
       return;
     }
 
@@ -186,7 +215,7 @@
     renderMini('#leaderTopRevives', board?.top_revives || [], 'revives');
     renderMini('#leaderTopKd', board?.top_kd || [], 'kd');
     const kdRule = $('#leaderKdRule');
-    if (kdRule) kdRule.textContent = `Minimum ${Number(board?.min_kd_kills || 10)} server kills to qualify.`;
+    if (kdRule) kdRule.textContent = `Minimum ${Number(board?.min_kd_kills || 10)} saved server kills to qualify.`;
     const tracked = $('#leaderTracked');
     if (tracked) tracked.textContent = `${Number(board?.tracked_players ?? players.length)} tracked players`;
     const updated = $('#leaderUpdated');
@@ -194,31 +223,33 @@
     renderTable();
   }
 
-  function renderLoadError(error) {
-    const message = esc(error?.message || error || 'Unable to load leaderboard.');
-    ['#leaderTopKills', '#leaderTopRevives', '#leaderTopKd'].forEach(selector => {
+  function renderError(error) {
+    const message = esc(error?.message || error || 'Could not load saved stats');
+    for (const selector of ['#leaderTopKills', '#leaderTopRevives', '#leaderTopKd']) {
       const box = $(selector);
-      if (box) box.innerHTML = `<div class="leaderboard-empty error">Unable to load: ${message}</div>`;
-    });
+      if (box) box.innerHTML = `<div class="leaderboard-empty error">${message}</div>`;
+    }
     const tbody = $('#leaderTableBody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty error">${message}</td></tr>`;
+    const tracked = $('#leaderTracked');
+    if (tracked) tracked.textContent = 'Stats unavailable';
   }
 
   async function load() {
     if (loading) return;
     loading = true;
     try {
-      // Leaderboard lives outside /player-stats/{player_id}; otherwise FastAPI's
-      // dynamic player route treats the word "leaderboard" as an actual player ID.
-      const [all, leaders] = await Promise.all([
-        api('/api/v2/player-stats?limit=1000'),
-        api('/api/v2/leaderboard?limit=5')
-      ]);
+      // Deliberately use the existing saved-stats endpoint as the single source of truth.
+      // This guarantees the leaderboard reflects the same /data/player-stats.db totals
+      // used by !stats and the join message instead of maintaining a second dataset.
+      const all = await api('/api/v2/player-stats?limit=1000');
       players = Array.isArray(all?.players) ? all.players : [];
-      board = leaders || {};
+      board = buildBoardFromSavedStats(players);
       render();
     } catch (error) {
-      renderLoadError(error);
+      players = [];
+      board = null;
+      renderError(error);
     } finally {
       loading = false;
     }
