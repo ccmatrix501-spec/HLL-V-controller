@@ -15,6 +15,7 @@ const RCON_BACKEND = process.env.RCON_BACKEND || (IS_RAILWAY
   ? 'http://hllv-rcon.railway.internal:8080'
   : 'http://hllv-rcon:8080');
 const CACHE_MS = Math.max(5_000, Number(process.env.PUBLIC_STATS_CACHE_MS || 15_000));
+const MAX_PUBLIC_PLAYERS = 10000;
 
 let cache = {
   expiresAt: 0,
@@ -73,7 +74,7 @@ async function getJson(endpoint) {
       Accept: 'application/json',
       'User-Agent': '1st-MI-Public-Stats/1.0',
     },
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(15_000),
   });
   const body = await response.text();
   let data = null;
@@ -90,7 +91,7 @@ async function statsPayload() {
   if (cache.payload && cache.expiresAt > now) return cache.payload;
 
   const [stats, status] = await Promise.all([
-    getJson('/api/v2/player-stats?limit=1000'),
+    getJson(`/api/v2/public-player-stats?limit=${MAX_PUBLIC_PLAYERS}`),
     getJson('/api/v2/player-stats/status'),
   ]);
 
@@ -100,7 +101,7 @@ async function statsPayload() {
 
   const payload = {
     game: 'Hell Let Loose: Vietnam',
-    tracked_players: number(status?.tracked_players) || players.length,
+    tracked_players: number(status?.tracked_players) || number(stats?.tracked_players) || players.length,
     last_poll_at: text(status?.last_poll_at, 80) || null,
     updated_at: new Date().toISOString(),
     players,
@@ -116,10 +117,10 @@ async function statsPayload() {
 function installPublicStats(app) {
   app.get('/public/stats/hllv', statsLimiter, async (req, res) => {
     try {
-      const requested = Number(req.query?.limit ?? 1000);
+      const requested = Number(req.query?.limit ?? MAX_PUBLIC_PLAYERS);
       const limit = Number.isFinite(requested)
-        ? Math.max(1, Math.min(1000, Math.floor(requested)))
-        : 1000;
+        ? Math.max(1, Math.min(MAX_PUBLIC_PLAYERS, Math.floor(requested)))
+        : MAX_PUBLIC_PLAYERS;
       const payload = await statsPayload();
       res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
       res.set('X-Content-Type-Options', 'nosniff');
