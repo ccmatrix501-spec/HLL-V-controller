@@ -30,6 +30,14 @@ const statsLimiter = rateLimit({
   message: { error: 'Too many stats requests. Try again in a moment.' },
 });
 
+const liveStatsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many live stats requests. Try again in a moment.' },
+});
+
 function number(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
@@ -129,6 +137,28 @@ function installPublicStats(app) {
       console.warn(`Public HLL:V stats unavailable: ${error?.message || error}`);
       return res.status(502).json({
         error: 'HLL:V player statistics are temporarily unavailable.',
+      });
+    }
+  });
+
+  app.get('/public/stats/hllv/live', liveStatsLimiter, async (req, res) => {
+    try {
+      const live = await getJson('/api/v2/public-player-stats-live?active_seconds=20&limit=500');
+      const players = Array.isArray(live?.players)
+        ? live.players.map(publicPlayer).filter(Boolean)
+        : [];
+      res.set('Cache-Control', 'no-store, max-age=0');
+      res.set('X-Content-Type-Options', 'nosniff');
+      return res.json({
+        game: 'Hell Let Loose: Vietnam',
+        updated_at: text(live?.updated_at, 80) || new Date().toISOString(),
+        active_players: number(live?.active_players) || players.length,
+        players,
+      });
+    } catch (error) {
+      console.warn(`Public HLL:V live stats unavailable: ${error?.message || error}`);
+      return res.status(502).json({
+        error: 'HLL:V live statistics are temporarily unavailable.',
       });
     }
   });
