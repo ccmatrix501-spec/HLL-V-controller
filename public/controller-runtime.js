@@ -12,10 +12,12 @@
   let activeReads = 0;
   let consecutiveReadFailures = 0;
   let breakerOpenUntil = 0;
+  let effectiveMaxConcurrentReads = 2;
 
   // Default bridge pool is 3 connections: one command lane + two read lanes.
-  // Two browser reads therefore keep the UI responsive without overdriving RCON.
-  const MAX_CONCURRENT_READS = 2;
+  // The runtime can adapt down when the bridge reports fewer healthy read lanes.
+  const MAX_CONCURRENT_READS = 3;
+  const DEFAULT_CONCURRENT_READS = 2;
   const MAX_QUEUED_READS = 24;
   const MAX_QUEUE_WAIT_MS = 12000;
   const DEFAULT_TIMEOUT_MS = 24000;
@@ -23,6 +25,7 @@
   const STALE_FALLBACK_MS = 30000;
   const BREAKER_FAILURE_THRESHOLD = 4;
   const BREAKER_COOLDOWN_MS = 8000;
+  const MAX_CACHE_ENTRIES = 128;
 
   const metrics = {
     requests: 0,
@@ -33,7 +36,9 @@
     queueDrops: 0,
     timeouts: 0,
     failures: 0,
-    breakerOpens: 0
+    breakerOpens: 0,
+    cacheEvictions: 0,
+    mutations: 0
   };
 
   function resolveUrl(input) {
@@ -60,8 +65,8 @@
 
   function syntheticPayload(url) {
     // Heavy feature-specific endpoints should not run just because their JS file
-    // exists on the page. Their nav/refresh handlers request real data when the
-    // user opens that section.
+    // exists on the page. Their own nav/refresh handlers request real data when
+    // the user opens that section.
     if (url.pathname === '/api/v2/logs' && !activeView('logs')) return { entries: [] };
     if (url.pathname === '/api/v2/bans' && url.searchParams.get('type') === 'perma' && !activeView('logs') && !activeView('bans')) return { banList: [] };
     if (url.pathname === '/api/v2/votes' && !activeView('voting')) return { active: null, history: [], templates: [] };
@@ -131,12 +136,30 @@
     });
   }
 
+  function pruneCache() {
+    const now = Date.now();
+    for (const [key, value] of cache) {
+      if (value.expiresAt <= now && now - value.record.storedAt > STALE_FALLBACK_MS) {
+        cache.delete(key);
+      }
+    }
+    if (cache.size <= MAX_CACHE_ENTRIES) return;
+    const oldest = [...cache.entries()]
+      .sort((a, b) => a[1].record.storedAt - b[1].record.storedAt)
+      .slice(0, cache.size - MAX_CACHE_ENTRIES);
+    for (const [key] of oldest) {
+      cache.delete(key);
+      metrics.cacheEvictions += 1;
+    }
+  }
+
   function cachedRecord(key, allowStale = false) {
     const cached = cache.get(key);
     if (!cached) return null;
     const now = Date.now();
     if (cached.expiresAt > now) return { ...cached, stale: false };
     if (allowStale && now - cached.record.storedAt <= STALE_FALLBACK_MS) return { ...cached, stale: true };
+    if (now - cached.record.storedAt > STALE_FALLBACK_MS) cache.delete(key);
     return null;
   }
 
@@ -153,6 +176,22 @@
   function recordSuccess() {
     consecutiveReadFailures = 0;
     breakerOpenUntil = 0;
+  }
+
+  function updateConcurrencyFromPool(record) {
+    try {
+      const text = new TextDecoder().decode(record.body);
+      const data = JSON.parse(text || '{}');
+      const readConnections = Number(data.read_connections);
+      const connectedConnections = Number(data.connected_connections);
+      if (Number.isFinite(readConnections)) {
+        effectiveMaxConcurrentReads = Math.max(1, Math.min(MAX_CONCURRENT_READS, readConnections || 1));
+      } else if (Number.isFinite(connectedConnections)) {
+        effectiveMaxConcurrentReads = Math.max(1, Math.min(MAX_CONCURRENT_READS, connectedConnections - 1 || 1));
+      }
+    } catch {
+      effectiveMaxConcurrentReads = Math.min(effectiveMaxConcurrentReads, DEFAULT_CONCURRENT_READS);
+    }
   }
 
   function queueError(message) {
@@ -174,7 +213,7 @@
     }
 
     readQueue.sort((a, b) => (a.priority - b.priority) || (a.enqueuedAt - b.enqueuedAt));
-    while (activeReads < MAX_CONCURRENT_READS && readQueue.length) {
+    while (activeReads < effectiveMaxConcurrentReads && readQueue.length) {
       const job = readQueue.shift();
       activeReads += 1;
       Promise.resolve()
@@ -243,9 +282,17 @@
 
     // Commands must never wait behind background reads. They get a bounded browser
     // wait, while write retries remain disabled in the RCON bridge to avoid duplicate
-    // kicks/bans/messages.
+    // kicks/bans/messages. Successful mutations invalidate read cache immediately.
     if (method !== 'GET') {
-      return fetchWithTimeout(input, init, timeoutFor(url, method));
+      metrics.mutations += 1;
+      return fetchWithTimeout(input, init, timeoutFor(url, method)).then(response => {
+        if (response.ok) {
+          cache.clear();
+          consecutiveReadFailures = 0;
+          breakerOpenUntil = 0;
+        }
+        return response;
+      });
     }
 
     const key = `${method} ${url.pathname}${url.search}`;
@@ -286,7 +333,11 @@
         const record = snapshotResponse(response, body);
         if (response.ok) {
           recordSuccess();
-          if (ttl > 0) cache.set(key, { record, expiresAt: Date.now() + ttl });
+          if (url.pathname === '/api/v2/connection/pool') updateConcurrencyFromPool(record);
+          if (ttl > 0) {
+            cache.set(key, { record, expiresAt: Date.now() + ttl });
+            pruneCache();
+          }
         } else if (response.status >= 500) {
           recordFailure();
         }
@@ -317,16 +368,24 @@
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') pumpQueue();
+    if (document.visibilityState === 'visible') {
+      pruneCache();
+      pumpQueue();
+    }
   });
 
+  // Periodic housekeeping is local-only; it does not create network traffic.
+  const maintenanceTimer = setInterval(pruneCache, 30000);
+  maintenanceTimer.unref?.();
+
   window.__HLLVControllerRuntime = {
-    version: '2.0.0',
+    version: '3.0.0',
     maxConcurrentReads: MAX_CONCURRENT_READS,
     clearCache() { cache.clear(); },
     status() {
       return {
         activeReads,
+        effectiveMaxConcurrentReads,
         queuedReads: readQueue.length,
         inFlight: [...inflight.keys()],
         cached: [...cache.keys()],
