@@ -1,7 +1,9 @@
 #logs .tk-card-detail{padding:0!important;overflow:hidden}
+#logs .tk-card-summary,#logs .admin-tk-group-summary{pointer-events:auto!important;position:relative;z-index:1;touch-action:manipulation}
 #logs .tk-card-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;cursor:pointer;list-style:none;user-select:none}
 #logs .tk-card-summary::-webkit-details-marker{display:none}
 #logs .tk-card-summary:hover{background:#151b17}
+#logs .tk-card-summary:focus-visible,#logs .admin-tk-group-summary:focus-visible{outline:2px solid #d9b95f;outline-offset:-2px}
 #logs .tk-card-player{display:grid;gap:2px;min-width:0}
 #logs .tk-card-summary-right{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-width:0}
 #logs .tk-card-latest{font-size:.67rem;color:#7f8a80;white-space:nowrap}
@@ -21,6 +23,8 @@
 #logs .tk-event-raw summary{cursor:pointer;color:#a5afa6}
 #logs .tk-event-raw code{display:block;margin-top:6px;padding:8px;border-radius:7px;background:#090d0a;white-space:pre-wrap;word-break:break-word;color:#9aa49b}
 #logs .cmdtk-permaban-note{margin:0 0 10px;padding:8px 10px;border:1px solid #394139;border-radius:8px;background:#0d120f;font-size:.74rem}
+#logs .cmdtk-match-label{margin-top:4px;font-size:.7rem;font-weight:800;color:#d9b95f;letter-spacing:.02em}
+#logs .cmdtk-action-note{margin-top:9px;padding:7px 9px;border:1px solid #3a423b;border-radius:7px;background:#0b100d;font-size:.7rem;line-height:1.35}
 @media(max-width:760px){
   #logs .tk-card-summary{align-items:flex-start}
   #logs .tk-card-summary-right{flex-wrap:wrap;justify-content:flex-end}
