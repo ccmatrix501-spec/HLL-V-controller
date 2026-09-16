@@ -22,7 +22,10 @@ const COOKIE_SECURE = process.env.COOKIE_SECURE !== undefined
   ? process.env.COOKIE_SECURE === 'true'
   : IS_RAILWAY;
 
-const RCON_PROXY_TIMEOUT_MS = 0;
+// Do not allow a dead RCON backend to leave browser requests open forever.
+// This timeout only applies to controller -> bridge HTTP proxy requests; it does
+// not close the bridge's persistent TCP/RCON connection to the game server.
+const RCON_PROXY_TIMEOUT_MS = Math.max(5000, Number(process.env.RCON_PROXY_TIMEOUT_MS || 30000));
 
 const SCHEDULER_FILE = process.env.SCHEDULER_FILE || '/tmp/1stmi-hllv-repeat-jobs.json';
 const MIN_REPEAT_INTERVAL_SECONDS = Math.max(10, Number(process.env.MIN_REPEAT_INTERVAL_SECONDS || 30));
@@ -140,7 +143,14 @@ app.get('/controller/status', (req, res) => {
 });
 
 app.get('/controller/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({ ok: true, service: '1stmi-hll-controller' });
+});
+
+// Railway healthchecks must never depend on login state or RCON availability.
+app.get('/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, service: '1stmi-hll-controller', rcon_backend: RCON_BACKEND });
 });
 
 let repeatJobs = [];
@@ -203,19 +213,29 @@ function loadRepeatJobs() {
 }
 
 async function postDirectToRcon(endpoint, body) {
-  const response = await fetch(`${RCON_BACKEND}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const text = await response.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!response.ok) {
-    const detail = data?.error || data?.detail || text || `${response.status} ${response.statusText}`;
-    throw new Error(String(detail));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RCON_PROXY_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${RCON_BACKEND}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!response.ok) {
+      const detail = data?.error || data?.detail || text || `${response.status} ${response.statusText}`;
+      throw new Error(String(detail));
+    }
+    return data;
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new Error(`RCON backend timed out after ${RCON_PROXY_TIMEOUT_MS}ms`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return data;
 }
 
 async function executeRepeatJob(job) {
@@ -419,29 +439,44 @@ const rconProxy = createProxyMiddleware({
 });
 
 app.use((req, res, next) => {
-  const isRconRoute = req.path.startsWith('/api/') || req.path === '/version' || req.path === '/health';
+  const isRconRoute = req.path.startsWith('/api/') || req.path === '/version';
   if (!isRconRoute) return next();
   requireAuth(req, res, () => rconProxy(req, res, next));
 });
 
+// The controller is updated frequently. Do not let Railway/browser caching mix
+// old JavaScript with a newly deployed backend.
 app.use(express.static(path.join(__dirname, 'public'), {
   extensions: ['html'],
-  maxAge: IS_RAILWAY ? '1h' : 0
+  maxAge: 0,
+  etag: false,
+  lastModified: false,
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
 }));
 
-app.use((req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.use((req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`1st M.I. HLL Server Controller listening on port ${PORT}`);
   console.log(`Deployment: ${IS_RAILWAY ? 'Railway' : 'local'}`);
   console.log(`RCON backend: ${RCON_BACKEND}`);
-  console.log('RCON proxy timeout: disabled');
+  console.log(`RCON proxy timeout: ${RCON_PROXY_TIMEOUT_MS}ms`);
   console.log(`HLL:V map pool locked to ${HLLV_ALLOWED_MAPS.length} configured maps`);
   console.log(`Repeat scheduler active; minimum interval ${MIN_REPEAT_INTERVAL_SECONDS}s; ${repeatJobs.filter(j => j.active).length} active job(s)`);
   console.log(`Repeat scheduler file: ${SCHEDULER_FILE}`);
 });
 
-server.requestTimeout = 0;
+// Keep normal browser/static requests responsive. Long-running RCON operations
+// are bounded by the proxy timeout above rather than by Node's server timeout.
+server.requestTimeout = Math.max(RCON_PROXY_TIMEOUT_MS + 5000, 35000);
+server.headersTimeout = Math.max(server.requestTimeout + 5000, 40000);
 
 function shutdown(signal) {
   console.log(`${signal} received. Saving repeat jobs and closing HTTP server...`);
