@@ -4,7 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node -r ./persistent-auth.js -r ./public-stats-preload.js server.js"
+    "start": "node -r ./persistent-auth.js -r ./controller-resilience-preload.js -r ./public-stats-preload.js server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
