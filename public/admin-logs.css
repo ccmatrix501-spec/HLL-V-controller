@@ -1,14 +1,13 @@
 @import url('/controller-polish.css');
 
-/* These selectors intentionally include #logs so they win over the controller's
-   generic form width rules without using inline styles (blocked by CSP). */
+/* Admin Logs layout */
 #logs .admin-log-viewer{display:grid;gap:16px;margin-top:0}
 #logs .admin-log-toolbar{display:grid;grid-template-columns:minmax(260px,1fr) minmax(170px,220px) auto auto;gap:10px;align-items:center;margin:0;padding:12px;border:1px solid var(--line);border-radius:11px;background:#101512}
 #logs .admin-log-toolbar input,#logs .admin-log-toolbar select{min-height:42px;margin:0}
 #logs .admin-log-toolbar input[type=search]{width:100%;min-width:0}
 #logs .admin-log-toolbar select{width:100%;min-width:0}
 #logs .admin-log-auto{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:.82rem;white-space:nowrap}
-#logs .admin-log-auto input[type=checkbox]{width:16px;height:16px;min-height:0;margin:0;padding:0;accent-color:var(--accent)}
+#logs .admin-log-auto input[type=checkbox]{width:16px!important;height:16px!important;min-height:0!important;margin:0!important;padding:0!important;accent-color:var(--accent);flex:0 0 auto}
 #logs #adminLogCount{font-size:.78rem;white-space:nowrap;text-align:right}
 #logs .admin-log-rows{display:flex;flex-direction:column;gap:9px;max-height:58vh;overflow:auto;padding-right:4px}
 #logs .admin-log-rows.loading{opacity:.72}
@@ -24,17 +23,78 @@
 #logs .admin-log-subpane{display:grid;gap:14px;min-width:0}
 #logs .admin-log-subpane[hidden]{display:none!important}
 #logs .admin-log-teamkill-pane{align-content:start}
-#logs .admin-log-teamkill-pane .tk-watch,#logs .admin-log-teamkill-pane .cmdtk-watch{margin:0}
 #logs .admin-log-teamkill-empty{padding:28px;text-align:center;color:#89958a;border:1px dashed #313a33;border-radius:10px;background:#101512}
+
+/* Teamkill Watch cards */
+#logs .tk-watch,#logs .cmdtk-watch{margin:0!important;padding:16px;border-radius:12px;background:#111613}
+#logs .tk-watch{border:1px solid rgba(203,75,69,.42)}
+#logs .cmdtk-watch{border:1px solid rgba(215,179,90,.38)}
+#logs .tk-watch-head,#logs .cmdtk-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
+#logs .tk-watch-head>div:first-child,#logs .cmdtk-head>div:first-child{min-width:260px;flex:1}
+#logs .tk-watch-head h4,#logs .cmdtk-head h4{margin:2px 0 5px;font-size:1rem}
+#logs .tk-watch-head .muted,#logs .cmdtk-head .muted{font-size:.8rem;line-height:1.45;max-width:850px}
+#logs .tk-watch-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px;border:1px solid #313a33;border-radius:9px;background:#0d110e}
+#logs .tk-watch-controls label{display:flex;gap:7px;align-items:center;font-size:.78rem;color:#cbd2cb;white-space:nowrap}
+#logs .tk-watch-controls select{width:auto!important;min-width:68px;min-height:34px;padding:6px 9px}
+#logs .tk-watch-controls input[type=checkbox]{width:16px!important;height:16px!important;min-height:0!important;margin:0!important;padding:0!important;accent-color:var(--accent);flex:0 0 auto}
+#logs .tk-watch-summary,#logs .cmdtk-summary{font-size:.78rem;margin:0 0 10px;color:var(--muted)}
+#logs .tk-watch-list,#logs .cmdtk-list{display:grid;gap:8px}
+#logs .tk-card,#logs .cmdtk-card{border-radius:10px;padding:12px 13px;background:#0e1310}
+#logs .tk-card{border:1px solid rgba(203,75,69,.28)}
+#logs .cmdtk-card{border:1px solid rgba(215,179,90,.26)}
+#logs .tk-card-top,#logs .cmdtk-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+#logs .tk-name,#logs .cmdtk-name{font-weight:800;color:#f3f5f1}
+#logs .tk-count{font-weight:900;color:#ff9792;white-space:nowrap;font-size:.78rem;padding:4px 7px;border:1px solid #6d3835;border-radius:999px;background:#251515}
+#logs .tk-id,#logs .cmdtk-id{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.7rem;color:#778278;margin-top:3px;word-break:break-all}
+#logs .tk-line,#logs .cmdtk-line{font-size:.78rem;margin-top:6px;line-height:1.4;color:#b6c0b7}
+#logs .tk-label,#logs .cmdtk-label{font-weight:800;color:#d6ddd6}
+#logs .tk-times,#logs .cmdtk-times{font-size:.72rem;color:#778278;margin-top:7px}
+#logs .tk-empty,#logs .cmdtk-empty{padding:12px;color:#89958a;text-align:center;border:1px dashed #313a33;border-radius:9px;background:#0e1310}
+#logs .cmdtk-badge{font-weight:900;padding:4px 8px;border-radius:999px;font-size:.7rem;white-space:nowrap}
+#logs .cmdtk-badge.kick{color:#ffaaa5;border:1px solid rgba(255,90,90,.45);background:#281515}
+#logs .cmdtk-badge.warn{color:#f3cf70;border:1px solid rgba(235,190,70,.5);background:#241f10}
+#logs .cmdtk-badge.ban{color:#ff8b86;border:1px solid rgba(255,70,70,.6);background:#2b1414}
+#logs .cmdtk-badge.ok{color:#9fdfae;border:1px solid rgba(80,190,110,.4);background:#102018}
+#logs .cmdtk-card.kick{border-color:rgba(220,75,75,.5)}
+#logs .cmdtk-card.warn{border-color:rgba(238,193,73,.48)}
+#logs .cmdtk-card.ban{border-color:rgba(255,70,70,.62)}
+#logs .cmdtk-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* Admin/VIP/Ban editable name records */
+#access .record-name-editor,#bans .record-name-editor{display:grid;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+#access .record-name-heading,#bans .record-name-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0}
+#access .record-name-heading>div,#bans .record-name-heading>div{min-width:220px;flex:1}
+#access .record-name-heading h4,#bans .record-name-heading h4{margin:0 0 4px;font-size:.96rem}
+#access .record-name-note,#bans .record-name-note{font-size:.76rem;line-height:1.45;color:var(--muted);margin:0;max-width:680px}
+#access .record-raw-toggle,#bans .record-raw-toggle{margin-left:auto;white-space:nowrap}
+#access .record-name-editor [data-record-list],#bans .record-name-editor [data-record-list]{display:grid;gap:8px;max-height:520px;overflow:auto;padding-right:3px}
+#access .record-name-row,#bans .record-name-row{display:grid;grid-template-columns:minmax(180px,.9fr) minmax(220px,1.15fr) auto;gap:12px;align-items:center;padding:12px;border:1px solid #303a32;border-radius:10px;background:#101512}
+#access .record-name-row:hover,#bans .record-name-row:hover{border-color:#465248;background:#121814}
+#access .record-name-row strong,#bans .record-name-row strong{display:block;font-size:.86rem;color:#f2f4f0;overflow-wrap:anywhere}
+#access .record-name-id,#bans .record-name-id{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.66rem;color:#778278;margin-top:3px;word-break:break-all}
+#access .record-name-meta,#bans .record-name-meta{font-size:.69rem;color:#879288;margin-top:4px;line-height:1.35}
+#access .record-name-input,#bans .record-name-input{width:100%!important;min-width:0;min-height:38px;padding:8px 10px;margin:0}
+#access .record-name-actions,#bans .record-name-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+#access .record-name-actions .btn,#bans .record-name-actions .btn{white-space:nowrap}
+#access .record-name-empty,#bans .record-name-empty{padding:18px;text-align:center;color:#879288;border:1px dashed #313a33;border-radius:9px;background:#0e1310}
+#access .data-box.tall,#bans .data-box.tall{min-height:180px;max-height:420px}
 
 @media(max-width:1100px){
   #logs .admin-log-toolbar{grid-template-columns:1fr 200px}
   #logs .admin-log-auto{justify-self:start}
   #logs #adminLogCount{justify-self:end}
+  #access .record-name-row,#bans .record-name-row{grid-template-columns:1fr 1.15fr}
+  #access .record-name-actions,#bans .record-name-actions{grid-column:1/-1;justify-content:flex-start}
 }
+
 @media(max-width:760px){
   #logs .admin-log-toolbar{grid-template-columns:1fr}
   #logs .admin-log-auto,#logs #adminLogCount{justify-self:start}
   #logs .admin-log-rows{max-height:none}
   #logs .admin-log-subtabs{grid-template-columns:1fr}
+  #logs .tk-watch-head,#logs .cmdtk-head{display:grid}
+  #logs .tk-watch-controls{width:100%}
+  #access .record-name-row,#bans .record-name-row{grid-template-columns:1fr}
+  #access .record-name-actions,#bans .record-name-actions{grid-column:auto;justify-content:flex-start}
+  #access .record-name-editor [data-record-list],#bans .record-name-editor [data-record-list]{max-height:none}
 }
