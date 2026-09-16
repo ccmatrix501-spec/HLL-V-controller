@@ -41,6 +41,10 @@
       haystack.includes('left admin camera');
   }
 
+  function isTeamkill(entry) {
+    return String(entry?.type || '').toUpperCase() === 'TEAM KILL';
+  }
+
   function summary(entry) {
     const t = entry.type || 'OTHER';
     switch (t) {
@@ -58,6 +62,116 @@
       case 'VOTE KICK': return entry.raw_message || t;
       default: return entry.raw_message || entry.message || entry.log_class || 'Admin log event';
     }
+  }
+
+  function attackerId(entry) {
+    return String(entry?.instigator_id || entry?.player_id || '').trim();
+  }
+
+  function attackerName(entry) {
+    return String(entry?.instigator_name || entry?.player_name || attackerId(entry) || 'Unknown player').trim();
+  }
+
+  function victimName(entry) {
+    return String(entry?.victim_name || entry?.victim_id || 'Unknown player').trim();
+  }
+
+  function weaponName(entry) {
+    return String(entry?.weapon_name || entry?.weapon_id || 'Unknown weapon / vehicle').trim();
+  }
+
+  function groupTeamkills(source) {
+    const groups = new Map();
+
+    for (const entry of source.filter(isTeamkill)) {
+      const id = attackerId(entry);
+      const name = attackerName(entry);
+      const key = id || `name:${name.toLowerCase()}`;
+      let group = groups.get(key);
+
+      if (!group) {
+        group = {
+          key,
+          id,
+          name,
+          events: [],
+          latestAt: entry.timestamp || null,
+          firstAt: entry.timestamp || null
+        };
+        groups.set(key, group);
+      }
+
+      group.events.push(entry);
+      if (id) group.id = id;
+      if (name) group.name = name;
+
+      const when = new Date(entry.timestamp || 0).getTime();
+      if (!group.firstAt || when < new Date(group.firstAt || 0).getTime()) group.firstAt = entry.timestamp;
+      if (!group.latestAt || when > new Date(group.latestAt || 0).getTime()) group.latestAt = entry.timestamp;
+    }
+
+    return [...groups.values()]
+      .sort((a, b) => b.events.length - a.events.length || new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
+  }
+
+  function renderTeamkillGroups(source) {
+    const groups = groupTeamkills(source);
+    if (!groups.length) return '<div class="admin-log-empty">No matching teamkill events.</div>';
+
+    return `<div class="admin-tk-groups">${groups.map((group) => {
+      const events = [...group.events].sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+      return `
+        <details class="admin-tk-group">
+          <summary class="admin-tk-group-summary">
+            <div class="admin-tk-group-player">
+              <strong>${esc(group.name)}</strong>
+              ${group.id ? `<span class="admin-tk-group-id">${esc(group.id)}</span>` : ''}
+            </div>
+            <div class="admin-tk-group-right">
+              <span class="admin-tk-count">${group.events.length} TEAMKILL${group.events.length === 1 ? '' : 'S'}</span>
+              <span class="admin-tk-latest">Latest ${esc(localTime(group.latestAt))}</span>
+              <span class="admin-tk-chevron" aria-hidden="true">⌄</span>
+            </div>
+          </summary>
+          <div class="admin-tk-event-list">
+            ${events.map((entry, index) => {
+              const raw = entry.raw_message || '';
+              const friendly = summary(entry);
+              return `
+                <article class="admin-tk-event">
+                  <div class="admin-tk-event-top">
+                    <span class="admin-tk-victim">Victim: <strong>${esc(victimName(entry))}</strong></span>
+                    <time>${esc(localTime(entry.timestamp))}</time>
+                  </div>
+                  <div class="admin-tk-event-weapon">${esc(weaponName(entry))}</div>
+                  ${entry?.victim_id ? `<div class="admin-tk-event-id">Victim ID: ${esc(entry.victim_id)}</div>` : ''}
+                  ${raw && raw !== friendly ? `<details class="admin-tk-raw"><summary>Raw teamkill log ${index + 1}</summary><code>${esc(raw)}</code></details>` : ''}
+                </article>`;
+            }).join('')}
+          </div>
+        </details>`;
+    }).join('')}</div>`;
+  }
+
+  function renderEvent(entry) {
+    const eventType = entry.type || 'OTHER';
+    const raw = entry.raw_message || '';
+    const friendly = summary(entry);
+    const details = Object.entries(entry)
+      .filter(([key, value]) => !['timestamp', 'type', 'raw_message', 'log_class'].includes(key) && value !== null && value !== undefined && value !== '')
+      .map(([key, value]) => `<span><b>${esc(key.replaceAll('_', ' '))}:</b> ${esc(value)}</span>`)
+      .join('');
+
+    return `
+      <article class="admin-log-row log-${typeClass(eventType)}">
+        <div class="admin-log-meta">
+          <span class="admin-log-badge">${esc(eventType)}</span>
+          <time>${esc(localTime(entry.timestamp))}</time>
+        </div>
+        <div class="admin-log-summary">${esc(friendly)}</div>
+        ${details ? `<div class="admin-log-details">${details}</div>` : ''}
+        ${raw && raw !== friendly ? `<details><summary>Raw event</summary><code>${esc(raw)}</code></details>` : ''}
+      </article>`;
   }
 
   function adoptTeamkillPanels() {
@@ -124,7 +238,7 @@
             <option value="CONNECT">Connect</option>
             <option value="DISCONNECT">Disconnect</option>
             <option value="KILL">Kills</option>
-            <option value="TEAM KILL">Teamkills</option>
+            <option value="TEAM KILL">Teamkills (grouped)</option>
             <option value="CHAT">Chat</option>
             <option value="MESSAGE">Server messages</option>
             <option value="KICK">Kicks</option>
@@ -156,8 +270,6 @@
       button.addEventListener('click', () => setSubtab(button.dataset.adminLogSubtab));
     });
 
-    // Teamkill scripts load after this file and historically inserted themselves
-    // above the normal log rows. Keep watching and move them into the Teamkill tab.
     const observer = new MutationObserver(() => adoptTeamkillPanels());
     observer.observe(viewer, { childList: true, subtree: true });
 
@@ -226,31 +338,22 @@
       return JSON.stringify(entry).toLowerCase().includes(query);
     });
 
+    if (type === 'TEAM KILL') {
+      const groups = groupTeamkills(filtered);
+      $('#adminLogCount').textContent = `${filtered.length} teamkill event${filtered.length === 1 ? '' : 's'} • ${groups.length} player${groups.length === 1 ? '' : 's'}`;
+      rows.classList.add('teamkill-group-mode');
+      rows.innerHTML = renderTeamkillGroups(filtered);
+      return;
+    }
+
+    rows.classList.remove('teamkill-group-mode');
     $('#adminLogCount').textContent = `${filtered.length} / ${entries.length} events`;
     if (!filtered.length) {
       rows.innerHTML = '<div class="admin-log-empty">No matching admin log events.</div>';
       return;
     }
 
-    rows.innerHTML = filtered.map((entry) => {
-      const eventType = entry.type || 'OTHER';
-      const raw = entry.raw_message || '';
-      const friendly = summary(entry);
-      const details = Object.entries(entry)
-        .filter(([key, value]) => !['timestamp', 'type', 'raw_message', 'log_class'].includes(key) && value !== null && value !== undefined && value !== '')
-        .map(([key, value]) => `<span><b>${esc(key.replaceAll('_', ' '))}:</b> ${esc(value)}</span>`)
-        .join('');
-      return `
-        <article class="admin-log-row log-${typeClass(eventType)}">
-          <div class="admin-log-meta">
-            <span class="admin-log-badge">${esc(eventType)}</span>
-            <time>${esc(localTime(entry.timestamp))}</time>
-          </div>
-          <div class="admin-log-summary">${esc(friendly)}</div>
-          ${details ? `<div class="admin-log-details">${details}</div>` : ''}
-          ${raw && raw !== friendly ? `<details><summary>Raw event</summary><code>${esc(raw)}</code></details>` : ''}
-        </article>`;
-    }).join('');
+    rows.innerHTML = filtered.map(renderEvent).join('');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
