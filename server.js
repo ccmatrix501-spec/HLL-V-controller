@@ -60,7 +60,9 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'"],
+      // Several controller widgets create safe inline style blocks/widths at
+      // runtime. Scripts remain self-only; only inline CSS is permitted here.
+      styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
       fontSrc: ["'self'"],
@@ -150,7 +152,54 @@ app.get('/controller/health', (req, res) => {
 // Railway healthchecks must never depend on login state or RCON availability.
 app.get('/health', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, service: '1stmi-hll-controller', rcon_backend: RCON_BACKEND });
+  res.json({ ok: true, service: '1stmi-hll-controller' });
+});
+
+// Authenticated diagnostic route for distinguishing controller problems from a
+// private-network/bridge problem without making the public healthcheck depend on RCON.
+app.get('/controller/diagnostics', requireAuth, async (req, res) => {
+  const startedAt = Date.now();
+  const result = {
+    ok: true,
+    controller: 'ready',
+    deployment: IS_RAILWAY ? 'railway' : 'local',
+    rcon_proxy_timeout_ms: RCON_PROXY_TIMEOUT_MS,
+    bridge_reachable: false,
+    bridge_health: null,
+    bridge_connection: null,
+    error: null,
+    elapsed_ms: 0
+  };
+
+  try {
+    const healthResponse = await fetch(`${RCON_BACKEND}/health`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const healthText = await healthResponse.text();
+    let healthData = healthText;
+    try { healthData = healthText ? JSON.parse(healthText) : null; } catch {}
+    if (!healthResponse.ok) throw new Error(`Bridge health returned ${healthResponse.status}`);
+    result.bridge_reachable = true;
+    result.bridge_health = healthData;
+
+    const statusResponse = await fetch(`${RCON_BACKEND}/api/v2/connection/status`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const statusText = await statusResponse.text();
+    let statusData = statusText;
+    try { statusData = statusText ? JSON.parse(statusText) : null; } catch {}
+    if (!statusResponse.ok) throw new Error(`Bridge connection status returned ${statusResponse.status}`);
+    result.bridge_connection = statusData;
+  } catch (err) {
+    result.ok = false;
+    result.error = err?.name === 'TimeoutError' ? 'Bridge diagnostic timed out after 5 seconds' : String(err?.message || err);
+  }
+
+  result.elapsed_ms = Date.now() - startedAt;
+  res.set('Cache-Control', 'no-store');
+  res.status(result.ok ? 200 : 502).json(result);
 });
 
 let repeatJobs = [];
