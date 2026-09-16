@@ -25,6 +25,46 @@
     }
   }
 
+  function setAuthenticatedView(authenticated) {
+    const login = document.getElementById('loginView');
+    const app = document.getElementById('appView');
+    if (!login || !app) return;
+
+    if (authenticated) {
+      login.classList.add('hidden');
+      login.style.display = 'none';
+      app.classList.remove('hidden');
+      app.style.removeProperty('display');
+      app.style.visibility = 'visible';
+      app.style.opacity = '1';
+      document.documentElement.dataset.controllerAuthenticated = '1';
+    } else {
+      document.documentElement.dataset.controllerAuthenticated = '0';
+      if (!visible(app)) {
+        login.classList.remove('hidden');
+        login.style.removeProperty('display');
+      }
+    }
+  }
+
+  async function syncAuthView() {
+    try {
+      const response = await fetch('/controller/status', {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!response.ok) return false;
+      const status = await response.json().catch(() => null);
+      const authenticated = Boolean(status?.authenticated);
+      setAuthenticatedView(authenticated);
+      return authenticated;
+    } catch (err) {
+      lastError = text(err?.message || err || 'Controller status check failed');
+      return false;
+    }
+  }
+
   function installLoginFallback() {
     const form = document.getElementById('loginForm');
     const passwordInput = document.getElementById('loginPassword');
@@ -33,8 +73,6 @@
 
     form.dataset.failsafeLoginInstalled = '1';
 
-    // Capture the submit before any feature script. Login must remain usable even
-    // if app.js or another optional controller module throws during startup.
     form.addEventListener('submit', async event => {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -76,19 +114,14 @@
         }
 
         passwordInput.value = '';
-
-        // Confirm that the session cookie is actually accepted before reloading.
-        const statusResponse = await fetch('/controller/status', {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json' }
-        });
-        const status = await statusResponse.json().catch(() => null);
-        if (!statusResponse.ok || !status?.authenticated) {
+        const authenticated = await syncAuthView();
+        if (!authenticated) {
           throw new Error('Login succeeded but the controller session was not retained. Please retry.');
         }
 
-        window.location.reload();
+        // Do not wait on the large feature bundle. The dashboard shell is already
+        // visible; reload once to let all authenticated modules initialise cleanly.
+        setTimeout(() => window.location.reload(), 100);
       } catch (err) {
         if (error) error.textContent = text(err?.message || err || 'Login failed');
         if (button) {
@@ -107,18 +140,10 @@
     panel.id = 'controllerBootError';
     panel.setAttribute('role', 'alert');
     Object.assign(panel.style, {
-      position: 'fixed',
-      left: '16px',
-      right: '16px',
-      bottom: '16px',
-      zIndex: '2147483647',
-      padding: '14px 16px',
-      border: '1px solid #844743',
-      borderRadius: '10px',
-      background: '#211716',
-      color: '#f4e9e7',
-      font: '14px/1.45 system-ui, sans-serif',
-      boxShadow: '0 12px 40px rgba(0,0,0,.45)'
+      position: 'fixed', left: '16px', right: '16px', bottom: '16px',
+      zIndex: '2147483647', padding: '14px 16px', border: '1px solid #844743',
+      borderRadius: '10px', background: '#211716', color: '#f4e9e7',
+      font: '14px/1.45 system-ui, sans-serif', boxShadow: '0 12px 40px rgba(0,0,0,.45)'
     });
 
     const title = document.createElement('strong');
@@ -140,13 +165,8 @@
     retry.type = 'button';
     retry.textContent = 'Retry controller';
     Object.assign(retry.style, {
-      cursor: 'pointer',
-      padding: '8px 11px',
-      borderRadius: '7px',
-      border: '1px solid #d7b35a',
-      background: '#d7b35a',
-      color: '#171309',
-      fontWeight: '700'
+      cursor: 'pointer', padding: '8px 11px', borderRadius: '7px',
+      border: '1px solid #d7b35a', background: '#d7b35a', color: '#171309', fontWeight: '700'
     });
     retry.addEventListener('click', () => location.reload());
 
@@ -154,13 +174,8 @@
     dismiss.type = 'button';
     dismiss.textContent = 'Dismiss';
     Object.assign(dismiss.style, {
-      cursor: 'pointer',
-      padding: '8px 11px',
-      borderRadius: '7px',
-      border: '1px solid #4a514b',
-      background: '#202620',
-      color: '#f1f4ef',
-      fontWeight: '700'
+      cursor: 'pointer', padding: '8px 11px', borderRadius: '7px',
+      border: '1px solid #4a514b', background: '#202620', color: '#f1f4ef', fontWeight: '700'
     });
     dismiss.addEventListener('click', () => panel.remove());
 
@@ -175,8 +190,9 @@
     const login = document.getElementById('loginView');
     const app = document.getElementById('appView');
 
-    // Never leave both primary views hidden. The login view is deliberately the
-    // safe fallback because it does not depend on RCON or any feature module.
+    // Never overwrite an authenticated app view with the login fallback.
+    if (document.documentElement.dataset.controllerAuthenticated === '1') return;
+
     if (login && !visible(login) && (!app || !visible(app))) {
       login.classList.remove('hidden');
       login.style.display = 'grid';
@@ -194,7 +210,6 @@
 
   window.addEventListener('error', event => {
     lastError = text(event?.error?.stack || event?.message || 'JavaScript error');
-    // Do not instantly cover a working controller for a non-fatal feature error.
     setTimeout(() => {
       const login = document.getElementById('loginView');
       const app = document.getElementById('appView');
@@ -211,22 +226,18 @@
     }, 0);
   });
 
-  // boot-failsafe.js is loaded after the login markup and before deferred feature
-  // scripts, so install the independent login path immediately.
+  ensureBasePaint();
   installLoginFallback();
+  void syncAuthView();
 
   document.addEventListener('DOMContentLoaded', () => {
     ensureBasePaint();
     installLoginFallback();
+    void syncAuthView();
 
-    // The login shell should always be paintable before any network request.
-    const login = document.getElementById('loginView');
-    const app = document.getElementById('appView');
-    if (login && !visible(login) && (!app || !visible(app))) {
-      login.classList.remove('hidden');
-    }
-
-    setTimeout(() => {
+    setTimeout(async () => {
+      const authenticated = await syncAuthView();
+      if (authenticated) return;
       const currentLogin = document.getElementById('loginView');
       const currentApp = document.getElementById('appView');
       if (!visible(currentLogin) && !visible(currentApp)) {
