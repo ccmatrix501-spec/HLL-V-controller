@@ -31,9 +31,6 @@
       .replaceAll('-', ' ');
   }
 
-  // Conservative list: only known/obvious commander-call-in wording is ignored.
-  // Normal firearms, grenades, mines, roadkills, tank guns, helicopter weapons,
-  // vehicle weapons and similar player-controlled kills continue to count.
   function isCommanderAbility(entry) {
     const text = commanderAbilityText(entry);
     const patterns = [
@@ -89,7 +86,6 @@
       qualifyingEvents += 1;
       const id = attackerId(entry);
       const name = attackerName(entry);
-      // Prefer stable user ID. Name fallback keeps old/partial log events useful.
       const key = id || `name:${name.toLowerCase()}`;
       if (!groups.has(key)) {
         groups.set(key, {
@@ -162,6 +158,7 @@
   function install() {
     const viewer = $('#adminLogsViewer');
     const rows = $('#adminLogRows');
+    const teamkillPane = $('#adminLogTeamkillPane');
     if (!viewer || !rows || $('#teamkillWatch')) return false;
 
     injectStyle();
@@ -184,7 +181,13 @@
       <div id="tkWatchSummary" class="tk-watch-summary muted">Loading teamkill history…</div>
       <div id="tkWatchList" class="tk-watch-list"><div class="tk-empty">Loading…</div></div>`;
 
-    rows.insertAdjacentElement('beforebegin', panel);
+    if (teamkillPane) {
+      teamkillPane.querySelector('.admin-log-teamkill-empty')?.remove();
+      teamkillPane.appendChild(panel);
+    } else {
+      rows.insertAdjacentElement('beforebegin', panel);
+    }
+
     $('#tkMinimum')?.addEventListener('change', render);
     $('#tkIncludeCommander')?.addEventListener('change', render);
     $('#tkRefresh')?.addEventListener('click', load);
