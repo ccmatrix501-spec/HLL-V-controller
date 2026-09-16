@@ -74,6 +74,25 @@
     }
   }
 
+  function setSubtab(view) {
+    const normal = $('#adminLogNormalPane');
+    const teamkill = $('#adminLogTeamkillPane');
+    if (!normal || !teamkill) return;
+
+    const target = view === 'teamkill' ? 'teamkill' : 'normal';
+    normal.hidden = target !== 'normal';
+    teamkill.hidden = target !== 'teamkill';
+
+    document.querySelectorAll('.admin-log-subtab').forEach((button) => {
+      const active = button.dataset.adminLogSubtab === target;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.tabIndex = active ? 0 : -1;
+    });
+
+    try { sessionStorage.setItem('hll-admin-log-subtab', target); } catch {}
+  }
+
   function install() {
     const raw = $('#logsBox');
     if (!raw || $('#adminLogsViewer')) return;
@@ -84,35 +103,62 @@
     viewer.id = 'adminLogsViewer';
     viewer.className = 'admin-log-viewer';
     viewer.innerHTML = `
-      <div class="admin-log-toolbar">
-        <input id="adminLogSearch" type="search" placeholder="Search player, weapon, message..." autocomplete="off" />
-        <select id="adminLogType">
-          <option value="ALL">All events</option>
-          <option value="CONNECT">Connect</option>
-          <option value="DISCONNECT">Disconnect</option>
-          <option value="KILL">Kills</option>
-          <option value="TEAM KILL">Teamkills</option>
-          <option value="CHAT">Chat</option>
-          <option value="MESSAGE">Server messages</option>
-          <option value="KICK">Kicks</option>
-          <option value="BAN">Bans</option>
-          <option value="TEAM SWITCH">Team switches</option>
-          <option value="MATCH START">Match start</option>
-          <option value="MATCH END">Match end</option>
-          <option value="VOTE KICK">Vote kicks</option>
-          <option value="OTHER">Other</option>
-        </select>
-        <label class="admin-log-auto"><input id="adminLogAuto" type="checkbox" checked /> Live refresh</label>
-        <span id="adminLogCount" class="muted"></span>
+      <div class="admin-log-subtabs" role="tablist" aria-label="Admin log views">
+        <button type="button" class="admin-log-subtab active" data-admin-log-subtab="normal" role="tab" aria-selected="true">
+          <span class="admin-log-subtab-title">Admin Logs</span>
+          <span class="admin-log-subtab-note">All server and moderation events</span>
+        </button>
+        <button type="button" class="admin-log-subtab" data-admin-log-subtab="teamkill" role="tab" aria-selected="false" tabindex="-1">
+          <span class="admin-log-subtab-title">Teamkill Watch</span>
+          <span class="admin-log-subtab-note">Repeat teamkills and commander abilities</span>
+        </button>
       </div>
-      <div id="adminLogRows" class="admin-log-rows">
-        <div class="admin-log-empty">Open Admin Logs to load events.</div>
+
+      <div id="adminLogNormalPane" class="admin-log-subpane">
+        <div class="admin-log-toolbar">
+          <input id="adminLogSearch" type="search" placeholder="Search player, weapon, message..." autocomplete="off" />
+          <select id="adminLogType">
+            <option value="ALL">All events</option>
+            <option value="CONNECT">Connect</option>
+            <option value="DISCONNECT">Disconnect</option>
+            <option value="KILL">Kills</option>
+            <option value="TEAM KILL">Teamkills</option>
+            <option value="CHAT">Chat</option>
+            <option value="MESSAGE">Server messages</option>
+            <option value="KICK">Kicks</option>
+            <option value="BAN">Bans</option>
+            <option value="TEAM SWITCH">Team switches</option>
+            <option value="MATCH START">Match start</option>
+            <option value="MATCH END">Match end</option>
+            <option value="VOTE KICK">Vote kicks</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <label class="admin-log-auto"><input id="adminLogAuto" type="checkbox" checked /> Live refresh</label>
+          <span id="adminLogCount" class="muted"></span>
+        </div>
+        <div id="adminLogRows" class="admin-log-rows">
+          <div class="admin-log-empty">Open Admin Logs to load events.</div>
+        </div>
+      </div>
+
+      <div id="adminLogTeamkillPane" class="admin-log-subpane admin-log-teamkill-pane" hidden>
+        <div class="admin-log-teamkill-empty">Loading Teamkill Watch tools…</div>
       </div>`;
     raw.insertAdjacentElement('afterend', viewer);
 
     $('#adminLogSearch').addEventListener('input', render);
     $('#adminLogType').addEventListener('change', render);
     $('#logRange')?.addEventListener('change', load);
+
+    document.querySelectorAll('.admin-log-subtab').forEach((button) => {
+      button.addEventListener('click', () => setSubtab(button.dataset.adminLogSubtab));
+    });
+
+    let initial = 'normal';
+    try {
+      if (sessionStorage.getItem('hll-admin-log-subtab') === 'teamkill') initial = 'teamkill';
+    } catch {}
+    setSubtab(initial);
 
     const nav = document.querySelector('[data-view="logs"]');
     nav?.addEventListener('click', () => setTimeout(load, 0));
@@ -143,7 +189,6 @@
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
       if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
       entries = (Array.isArray(data?.entries) ? data.entries : []).filter(entry => !isAdminCameraEvent(entry));
-      // hllrcon returns oldest first; admin work is easier with newest first.
       entries.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
       render();
     } catch (error) {
