@@ -5,6 +5,7 @@ COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY persistent-auth.js ./
+COPY controller-resilience-preload.js ./
 COPY public-stats-preload.js ./
 COPY server.js ./
 COPY public ./public
@@ -12,4 +13,4 @@ COPY public ./public
 ENV NODE_ENV=production
 EXPOSE 8090
 USER node
-CMD ["node", "--require", "./persistent-auth.js", "--require", "./public-stats-preload.js", "server.js"]
+CMD ["node", "--require", "./persistent-auth.js", "--require", "./controller-resilience-preload.js", "--require", "./public-stats-preload.js", "server.js"]
