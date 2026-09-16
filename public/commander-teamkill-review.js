@@ -131,15 +131,44 @@
       .sort((a, b) => new Date(b.lastAt || 0) - new Date(a.lastAt || 0));
   }
 
-  // 1st M.I. policy for commander call-ins:
-  // - These incidents never count as bannable repeat-teamkill events.
-  // - Kick case if the strike gets fewer than 2 enemy kills, OR friendly kills
-  //   outnumber enemy kills. Example: 2 enemy kills + 3 teamkills => KICK.
+  // 1st M.I. commander-call-in escalation policy:
+  // - 10+ teamkills from one ability incident => permanent ban.
+  // - 5-9 teamkills => warning. The earlier kick-efficiency rule still applies,
+  //   so a 5-9 TK incident may be WARNING + KICK when it also fails that rule.
+  // - Under 5 teamkills => kick if fewer than 2 enemy kills OR TKs exceed enemy kills.
   function decision(incident) {
+    if (incident.teamKills >= 10) {
+      return {
+        ban: true,
+        warn: false,
+        kick: false,
+        label: 'BAN',
+        severity: 'ban',
+        reason: `${incident.teamKills} commander-ability teamkills meets the 10+ permanent-ban threshold`
+      };
+    }
+
     const kick = incident.enemyKills < 2 || incident.teamKills > incident.enemyKills;
+
+    if (incident.teamKills >= 5) {
+      return {
+        ban: false,
+        warn: true,
+        kick,
+        label: kick ? 'WARNING + KICK' : 'WARNING',
+        severity: kick ? 'kick' : 'warn',
+        reason: kick
+          ? `${incident.teamKills} commander-ability teamkills meets the warning threshold; strike also fails the kill-efficiency rule`
+          : `${incident.teamKills} commander-ability teamkills meets the 5+ warning threshold`
+      };
+    }
+
     return {
+      ban: false,
+      warn: false,
       kick,
-      label: kick ? 'KICK' : 'NO KICK',
+      label: kick ? 'KICK' : 'NO ACTION',
+      severity: kick ? 'kick' : 'ok',
       reason: incident.enemyKills < 2
         ? `Only ${incident.enemyKills} enemy kill${incident.enemyKills === 1 ? '' : 's'}`
         : incident.teamKills > incident.enemyKills
@@ -158,12 +187,53 @@
       .cmdtk-head h4{margin:2px 0 4px}.cmdtk-list{display:grid;gap:9px}.cmdtk-summary{font-size:.86rem;margin:0 0 10px}
       .cmdtk-card{border:1px solid rgba(225,184,76,.28);border-radius:10px;padding:11px 12px;background:rgba(255,255,255,.025)}
       .cmdtk-card.kick{border-color:rgba(220,75,75,.55);background:rgba(120,25,25,.07)}
+      .cmdtk-card.warn{border-color:rgba(238,193,73,.58);background:rgba(128,96,18,.09)}
+      .cmdtk-card.ban{border-color:rgba(255,70,70,.72);background:rgba(135,15,15,.13)}
       .cmdtk-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.cmdtk-name{font-weight:700}.cmdtk-id{font-family:monospace;font-size:.78rem;opacity:.72;word-break:break-all}
-      .cmdtk-badge{font-weight:800;padding:4px 8px;border-radius:999px;font-size:.78rem}.cmdtk-badge.kick{color:#ff9b9b;border:1px solid rgba(255,90,90,.45)}.cmdtk-badge.ok{color:#9fdfae;border:1px solid rgba(80,190,110,.4)}
+      .cmdtk-badge{font-weight:800;padding:4px 8px;border-radius:999px;font-size:.78rem}.cmdtk-badge.kick{color:#ff9b9b;border:1px solid rgba(255,90,90,.45)}.cmdtk-badge.warn{color:#f3cf70;border:1px solid rgba(235,190,70,.5)}.cmdtk-badge.ban{color:#ff7d7d;border:1px solid rgba(255,70,70,.6)}.cmdtk-badge.ok{color:#9fdfae;border:1px solid rgba(80,190,110,.4)}
       .cmdtk-line{margin-top:6px;font-size:.84rem;line-height:1.4}.cmdtk-label{font-weight:700;opacity:.78}.cmdtk-times{margin-top:6px;font-size:.78rem;opacity:.68}.cmdtk-actions{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
       .cmdtk-empty{padding:8px 0;opacity:.72}
     `;
     document.head.appendChild(style);
+  }
+
+  async function apiAction(url, body) {
+    const response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+    if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
+    return data;
+  }
+
+  async function warnPlayer(incident, button) {
+    if (!incident.id) {
+      alert('This log incident does not include a player ID, so the controller cannot warn them automatically.');
+      return;
+    }
+
+    const message = `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkills.\nCommander abilities reaching 5 teamkills receive a warning.\n10 teamkills from an ability can result in a permanent ban.\n\nWatch friendly positions before using commander abilities.`;
+    if (!confirm(`Send a commander-ability warning to ${incident.name}?\n\n${incident.teamKills} teamkill(s)`)) return;
+
+    const oldText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Sending...';
+    try {
+      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message });
+      if (typeof window.toast === 'function') window.toast(`Warning sent to ${incident.name}`);
+      else alert(`Warning sent to ${incident.name}.`);
+    } catch (error) {
+      if (typeof window.toast === 'function') window.toast(error.message, 'error');
+      else alert(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
   }
 
   async function kickPlayer(incident, button) {
@@ -179,18 +249,38 @@
     button.disabled = true;
     button.textContent = 'Kicking...';
     try {
-      const response = await fetch('/api/v2/kick', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ player_id: incident.id, reason })
-      });
-      const text = await response.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch { data = null; }
-      if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
+      await apiAction('/api/v2/kick', { player_id: incident.id, reason });
       if (typeof window.toast === 'function') window.toast(`${incident.name} kicked`);
       else alert(`${incident.name} kicked.`);
+    } catch (error) {
+      if (typeof window.toast === 'function') window.toast(error.message, 'error');
+      else alert(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  }
+
+  async function banPlayer(incident, button) {
+    if (!incident.id) {
+      alert('This log incident does not include a player ID, so the controller cannot ban them automatically.');
+      return;
+    }
+
+    const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills)`;
+    if (!confirm(`Permanently ban ${incident.name}?\n\n${incident.teamKills} commander-ability teamkills meets the 10+ ban threshold.\n\n${reason}`)) return;
+
+    const oldText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Banning...';
+    try {
+      await apiAction('/api/v2/perma-ban', {
+        player_id: incident.id,
+        reason,
+        admin_name: '1st M.I. Admin'
+      });
+      if (typeof window.toast === 'function') window.toast(`${incident.name} permanently banned`);
+      else alert(`${incident.name} permanently banned.`);
     } catch (error) {
       if (typeof window.toast === 'function') window.toast(error.message, 'error');
       else alert(error.message);
@@ -214,7 +304,7 @@
         <div>
           <div class="eyebrow">COMMANDER ABILITY REVIEW</div>
           <h4>Commander Call-in Teamkills</h4>
-          <div class="muted">Commander call-ins are ban-exempt. A strike is a kick case when it gets fewer than 2 enemy kills or when teamkills exceed enemy kills.</div>
+          <div class="muted">5-9 ability teamkills = warning. 10+ = permanent ban. Below 5, the existing kick rule still applies when a strike gets fewer than 2 enemy kills or teamkills exceed enemy kills.</div>
         </div>
         <button id="commanderTkRefresh" type="button" class="btn ghost small">Refresh</button>
       </div>
@@ -260,8 +350,11 @@
     if (!summary || !list) return;
 
     const incidents = buildIncidents(events);
-    const kickCases = incidents.filter((incident) => decision(incident).kick).length;
-    summary.textContent = `${incidents.length} commander incident(s) with friendly kills • ${kickCases} kick case(s) • 0 count toward bannable repeat-teamkill totals.`;
+    const decisions = incidents.map((incident) => decision(incident));
+    const banCases = decisions.filter((result) => result.ban).length;
+    const warningCases = decisions.filter((result) => result.warn).length;
+    const kickCases = decisions.filter((result) => result.kick).length;
+    summary.textContent = `${incidents.length} commander incident(s) with friendly kills • ${warningCases} warning case(s) • ${kickCases} kick case(s) • ${banCases} permanent-ban case(s).`;
 
     if (!incidents.length) {
       list.innerHTML = '<div class="cmdtk-empty">No commander-ability teamkill incidents in the selected log period.</div>';
@@ -272,28 +365,53 @@
       const result = decision(incident);
       const enemyNames = incident.enemies.slice(0, 6).join(', ') || 'None';
       const friendlyNames = incident.friendlies.slice(0, 6).join(', ') || 'None';
+      const policyText = result.ban
+        ? '10+ ability teamkills — permanent-ban threshold reached'
+        : result.warn
+          ? `5+ ability teamkills — warning threshold reached${result.kick ? '; kick rule also triggered' : ''}`
+          : result.reason;
+
+      const actions = [];
+      if (result.warn) actions.push(`<button type="button" class="btn ghost small cmdtk-warn" data-index="${index}" ${incident.id ? '' : 'disabled'}>Send Warning</button>`);
+      if (result.kick && !result.ban) actions.push(`<button type="button" class="btn danger small cmdtk-kick" data-index="${index}" ${incident.id ? '' : 'disabled'}>Kick Player</button>`);
+      if (result.ban) actions.push(`<button type="button" class="btn danger small cmdtk-ban" data-index="${index}" ${incident.id ? '' : 'disabled'}>Permanently Ban</button>`);
+
       return `
-        <article class="cmdtk-card ${result.kick ? 'kick' : ''}" data-cmdtk-index="${index}">
+        <article class="cmdtk-card ${esc(result.severity)}" data-cmdtk-index="${index}">
           <div class="cmdtk-top">
             <div>
               <div class="cmdtk-name">${esc(incident.name)} — ${esc(incident.ability)}</div>
               ${incident.id ? `<div class="cmdtk-id">${esc(incident.id)}</div>` : ''}
             </div>
-            <span class="cmdtk-badge ${result.kick ? 'kick' : 'ok'}">${esc(result.label)}</span>
+            <span class="cmdtk-badge ${esc(result.severity)}">${esc(result.label)}</span>
           </div>
           <div class="cmdtk-line"><span class="cmdtk-label">Result:</span> ${incident.enemyKills} enemy kill(s) • ${incident.teamKills} teamkill(s)</div>
-          <div class="cmdtk-line"><span class="cmdtk-label">Policy:</span> ${esc(result.reason)} • BAN EXEMPT</div>
+          <div class="cmdtk-line"><span class="cmdtk-label">Policy:</span> ${esc(policyText)}</div>
           <div class="cmdtk-line"><span class="cmdtk-label">Enemy victims:</span> ${esc(enemyNames)}</div>
           <div class="cmdtk-line"><span class="cmdtk-label">Friendly victims:</span> ${esc(friendlyNames)}</div>
           <div class="cmdtk-times">${esc(localTime(incident.firstAt))}${incident.lastAt && incident.lastAt !== incident.firstAt ? ` → ${esc(localTime(incident.lastAt))}` : ''}</div>
-          ${result.kick ? `<div class="cmdtk-actions"><button type="button" class="btn danger small cmdtk-kick" data-index="${index}" ${incident.id ? '' : 'disabled'}>Kick Player</button></div>` : ''}
+          ${actions.length ? `<div class="cmdtk-actions">${actions.join('')}</div>` : ''}
         </article>`;
     }).join('');
+
+    list.querySelectorAll('.cmdtk-warn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const incident = incidents[Number(button.dataset.index)];
+        if (incident) warnPlayer(incident, button);
+      });
+    });
 
     list.querySelectorAll('.cmdtk-kick').forEach((button) => {
       button.addEventListener('click', () => {
         const incident = incidents[Number(button.dataset.index)];
         if (incident) kickPlayer(incident, button);
+      });
+    });
+
+    list.querySelectorAll('.cmdtk-ban').forEach((button) => {
+      button.addEventListener('click', () => {
+        const incident = incidents[Number(button.dataset.index)];
+        if (incident) banPlayer(incident, button);
       });
     });
   }
