@@ -1,9 +1,13 @@
 (() => {
   let loading = false;
   let events = [];
+  let permanentBanIds = new Set();
+  let permanentBanNames = new Set();
+  let permanentBanReady = false;
+  let lastCases = [];
 
   const $ = (selector) => document.querySelector(selector);
-  const INCIDENT_WINDOW_MS = 60 * 1000;
+  const MIN_MATCH_LOOKBACK_SECONDS = 21600;
 
   function esc(value) {
     return String(value ?? '')
@@ -21,6 +25,10 @@
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
+  }
+
+  function typeOf(entry) {
+    return String(entry?.type || '').trim().toUpperCase();
   }
 
   function eventText(entry) {
@@ -41,26 +49,41 @@
       ['concentrated strike', 'Precision / Concentrated Strike'],
       ['bombing run', 'Bombing Run'],
       ['bombingrun', 'Bombing Run'],
-      ['barrage', 'Barrage / Wide Strike'],
       ['rocket barrage', 'Barrage / Wide Strike'],
+      ['katyusha barrage', 'Barrage / Wide Strike'],
       ['katyusha', 'Barrage / Wide Strike'],
       ['wide strike', 'Barrage / Wide Strike'],
+      ['barrage', 'Barrage / Wide Strike'],
       ['strafing run', 'Strafing Run'],
       ['strafingrun', 'Strafing Run'],
       ['air strike', 'Air Strike'],
       ['airstrike', 'Air Strike']
     ];
-    for (const [needle, label] of checks) if (text.includes(needle)) return label;
+    for (const [needle, label] of checks) {
+      if (text.includes(needle)) return label;
+    }
     return null;
   }
 
   function isKill(entry) {
-    const type = String(entry?.type || '').toUpperCase();
+    const type = typeOf(entry);
     return type === 'KILL' || type === 'TEAM KILL';
   }
 
   function isTeamkill(entry) {
-    return String(entry?.type || '').toUpperCase() === 'TEAM KILL';
+    return typeOf(entry) === 'TEAM KILL';
+  }
+
+  function isMatchStart(entry) {
+    if (typeOf(entry) === 'MATCH START') return true;
+    const text = String(entry?.raw_message || entry?.message || '').toLowerCase();
+    return text.includes('match started:') || text.includes('match start:');
+  }
+
+  function isMatchEnd(entry) {
+    if (typeOf(entry) === 'MATCH END') return true;
+    const text = String(entry?.raw_message || entry?.message || '').toLowerCase();
+    return text.includes('match ended:') || text.includes('match end:');
   }
 
   function attackerId(entry) {
@@ -75,118 +98,249 @@
     return String(entry?.victim_name || entry?.victim_id || 'Unknown').trim();
   }
 
-  function buildIncidents(source) {
-    const abilityKills = source
-      .filter(isKill)
-      .map((entry) => ({ entry, ability: abilityName(entry) }))
-      .filter((item) => item.ability)
-      .sort((a, b) => new Date(a.entry.timestamp || 0) - new Date(b.entry.timestamp || 0));
-
-    const incidents = [];
-    const open = new Map();
-
-    for (const item of abilityKills) {
-      const entry = item.entry;
-      const id = attackerId(entry);
-      const name = attackerName(entry);
-      const ownerKey = id || `name:${name.toLowerCase()}`;
-      const key = `${ownerKey}|${item.ability}`;
-      const when = new Date(entry.timestamp || 0).getTime();
-      let incident = open.get(key);
-
-      if (!incident || !Number.isFinite(when) || when - incident.lastMs > INCIDENT_WINDOW_MS) {
-        incident = {
-          key: `${key}|${entry.timestamp || incidents.length}`,
-          id,
-          name,
-          ability: item.ability,
-          enemyKills: 0,
-          teamKills: 0,
-          enemies: [],
-          friendlies: [],
-          firstAt: entry.timestamp || null,
-          lastAt: entry.timestamp || null,
-          lastMs: when
-        };
-        incidents.push(incident);
-        open.set(key, incident);
-      }
-
-      if (id) incident.id = id;
-      if (name) incident.name = name;
-      incident.lastAt = entry.timestamp || incident.lastAt;
-      incident.lastMs = Number.isFinite(when) ? when : incident.lastMs;
-
-      if (isTeamkill(entry)) {
-        incident.teamKills += 1;
-        incident.friendlies.push(victimName(entry));
-      } else {
-        incident.enemyKills += 1;
-        incident.enemies.push(victimName(entry));
-      }
-    }
-
-    return incidents
-      .filter((incident) => incident.teamKills > 0)
-      .sort((a, b) => new Date(b.lastAt || 0) - new Date(a.lastAt || 0));
+  function normalizeId(value) {
+    return String(value || '').trim().toLowerCase();
   }
 
-  // 1st M.I. commander-call-in escalation policy:
-  // - 0-4 teamkills => warning that further ability teamkills will result in a kick.
-  // - 5-9 teamkills => kick plus warning that 10+ results in a 3-hour temporary ban.
-  // - 10+ teamkills => 3-hour temporary ban.
-  // Commander-ability teamkills remain separate from normal repeat-teamkill ban logic.
-  function decision(incident) {
-    if (incident.teamKills >= 10) {
-      return {
-        tempBan: true,
-        kick: false,
-        warn: false,
-        label: '3H TEMP BAN',
-        severity: 'ban',
-        reason: `${incident.teamKills} commander-ability teamkills meets the 10+ three-hour temporary-ban threshold`
-      };
-    }
+  function normalizeName(value) {
+    return String(value || '').trim().toLowerCase();
+  }
 
-    if (incident.teamKills >= 5) {
-      return {
-        tempBan: false,
-        kick: true,
-        warn: true,
-        label: 'KICK + TEMP BAN WARNING',
-        severity: 'kick',
-        reason: `${incident.teamKills} commander-ability teamkills is within the 5-9 kick threshold; 10+ results in a three-hour temporary ban`
-      };
+  function banListFrom(data) {
+    if (Array.isArray(data)) return data;
+    if (!data || typeof data !== 'object') return [];
+    for (const key of ['banList', 'bans', 'items', 'data']) {
+      if (Array.isArray(data[key])) return data[key];
     }
+    return [];
+  }
 
+  async function loadPermanentBans() {
+    try {
+      const response = await fetch('/api/v2/bans?type=perma', {
+        credentials: 'include',
+        cache: 'no-store'
+      });
+      const text = await response.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+      if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
+
+      const ids = new Set();
+      const names = new Set();
+      for (const record of banListFrom(data)) {
+        const id = normalizeId(record?.userId || record?.player_id || record?.playerId || record?.id || record?.ID);
+        const name = normalizeName(record?.userName || record?.username || record?.player_name || record?.playerName || record?.name);
+        if (id) ids.add(id);
+        if (name) names.add(name);
+      }
+      permanentBanIds = ids;
+      permanentBanNames = names;
+      permanentBanReady = true;
+      return true;
+    } catch (error) {
+      permanentBanReady = false;
+      console.warn(`Could not load permanent bans for Commander Teamkill Review: ${error?.message || error}`);
+      return false;
+    }
+  }
+
+  function isPermanentlyBanned(id, name = '') {
+    const normalizedId = normalizeId(id);
+    const normalizedName = normalizeName(name);
+    return Boolean(
+      (normalizedId && permanentBanIds.has(normalizedId)) ||
+      (normalizedName && permanentBanNames.has(normalizedName))
+    );
+  }
+
+  function mapNameFrom(entry) {
+    return String(entry?.map_name || entry?.map || entry?.MapName || '').trim();
+  }
+
+  function gameModeFrom(entry) {
+    return String(entry?.game_mode_id || entry?.game_mode || entry?.mode || '').trim();
+  }
+
+  function makeMatch(entry, index, hasStart) {
     return {
-      tempBan: false,
-      kick: false,
-      warn: true,
-      label: 'KICK WARNING',
-      severity: 'warn',
-      reason: `${incident.teamKills} commander-ability teamkill${incident.teamKills === 1 ? '' : 's'} — warning issued; 5+ results in a kick`
+      key: `${hasStart ? 'match' : 'partial'}:${entry?.timestamp || index}:${index}`,
+      mapName: mapNameFrom(entry),
+      gameMode: gameModeFrom(entry),
+      startAt: hasStart ? (entry?.timestamp || null) : null,
+      endAt: null,
+      hasStart,
+      hasEnd: false,
+      events: [],
+      active: true
     };
   }
 
-  function injectStyle() {
-    if ($('#commanderTkStyle')) return;
-    const style = document.createElement('style');
-    style.id = 'commanderTkStyle';
-    style.textContent = `
-      .cmdtk-watch{margin:0 0 16px;padding:14px;border:1px solid rgba(225,184,76,.38);border-radius:12px;background:rgba(140,110,20,.07)}
-      .cmdtk-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
-      .cmdtk-head h4{margin:2px 0 4px}.cmdtk-list{display:grid;gap:9px}.cmdtk-summary{font-size:.86rem;margin:0 0 10px}
-      .cmdtk-card{border:1px solid rgba(225,184,76,.28);border-radius:10px;padding:11px 12px;background:rgba(255,255,255,.025)}
-      .cmdtk-card.kick{border-color:rgba(220,75,75,.55);background:rgba(120,25,25,.07)}
-      .cmdtk-card.warn{border-color:rgba(238,193,73,.58);background:rgba(128,96,18,.09)}
-      .cmdtk-card.ban{border-color:rgba(255,70,70,.72);background:rgba(135,15,15,.13)}
-      .cmdtk-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.cmdtk-name{font-weight:700}.cmdtk-id{font-family:monospace;font-size:.78rem;opacity:.72;word-break:break-all}
-      .cmdtk-badge{font-weight:800;padding:4px 8px;border-radius:999px;font-size:.78rem}.cmdtk-badge.kick{color:#ff9b9b;border:1px solid rgba(255,90,90,.45)}.cmdtk-badge.warn{color:#f3cf70;border:1px solid rgba(235,190,70,.5)}.cmdtk-badge.ban{color:#ff7d7d;border:1px solid rgba(255,70,70,.6)}.cmdtk-badge.ok{color:#9fdfae;border:1px solid rgba(80,190,110,.4)}
-      .cmdtk-line{margin-top:6px;font-size:.84rem;line-height:1.4}.cmdtk-label{font-weight:700;opacity:.78}.cmdtk-times{margin-top:6px;font-size:.78rem;opacity:.68}.cmdtk-actions{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
-      .cmdtk-empty{padding:8px 0;opacity:.72}
-    `;
-    document.head.appendChild(style);
+  function segmentMatches(source) {
+    const sorted = [...source].sort((a, b) => new Date(a?.timestamp || 0) - new Date(b?.timestamp || 0));
+    const matches = [];
+    let current = null;
+
+    for (let index = 0; index < sorted.length; index += 1) {
+      const entry = sorted[index];
+
+      if (isMatchStart(entry)) {
+        if (current) {
+          current.active = false;
+          if (!current.endAt) current.endAt = entry?.timestamp || null;
+        }
+        current = makeMatch(entry, index, true);
+        current.events.push(entry);
+        matches.push(current);
+        continue;
+      }
+
+      if (!current) {
+        current = makeMatch(entry, index, false);
+        matches.push(current);
+      }
+
+      current.events.push(entry);
+      if (!current.mapName) current.mapName = mapNameFrom(entry);
+      if (!current.gameMode) current.gameMode = gameModeFrom(entry);
+
+      if (isMatchEnd(entry)) {
+        current.hasEnd = true;
+        current.active = false;
+        current.endAt = entry?.timestamp || null;
+        if (!current.mapName) current.mapName = mapNameFrom(entry);
+        if (!current.gameMode) current.gameMode = gameModeFrom(entry);
+        current = null;
+      }
+    }
+
+    return matches;
+  }
+
+  function decision(teamKills) {
+    if (teamKills >= 10) {
+      return {
+        level: 'ban',
+        label: '3H TEMP BAN',
+        policy: '10+ commander-ability teamkills in this match — 3-hour temporary ban'
+      };
+    }
+    if (teamKills >= 5) {
+      return {
+        level: 'kick',
+        label: 'KICK + WARNING',
+        policy: '5-9 commander-ability teamkills in this match — warning plus kick; 10+ is a 3-hour temporary ban'
+      };
+    }
+    return {
+      level: 'warn',
+      label: 'WARNING',
+      policy: '0-4 commander-ability teamkills in this match — warning that 5+ results in a kick'
+    };
+  }
+
+  function buildMatchCases(source, selectedSeconds) {
+    const matches = segmentMatches(source);
+    const cutoff = Date.now() - (selectedSeconds * 1000);
+    const cases = [];
+    let excludedPermanent = 0;
+
+    for (const match of matches) {
+      const players = new Map();
+
+      for (const entry of match.events) {
+        if (!isKill(entry)) continue;
+        const ability = abilityName(entry);
+        if (!ability) continue;
+
+        const id = attackerId(entry);
+        const name = attackerName(entry);
+        if (permanentBanReady && isPermanentlyBanned(id, name)) {
+          excludedPermanent += 1;
+          continue;
+        }
+
+        const key = id || `name:${name.toLowerCase()}`;
+        if (!players.has(key)) {
+          players.set(key, {
+            key,
+            id,
+            name,
+            teamKills: 0,
+            enemyKills: 0,
+            friendlies: [],
+            enemies: [],
+            abilities: new Map(),
+            firstAt: entry?.timestamp || null,
+            lastAt: entry?.timestamp || null
+          });
+        }
+
+        const player = players.get(key);
+        if (id) player.id = id;
+        if (name) player.name = name;
+        const abilityStats = player.abilities.get(ability) || { teamKills: 0, enemyKills: 0 };
+
+        if (isTeamkill(entry)) {
+          player.teamKills += 1;
+          abilityStats.teamKills += 1;
+          player.friendlies.push(victimName(entry));
+        } else {
+          player.enemyKills += 1;
+          abilityStats.enemyKills += 1;
+          player.enemies.push(victimName(entry));
+        }
+        player.abilities.set(ability, abilityStats);
+
+        const when = new Date(entry?.timestamp || 0).getTime();
+        const first = new Date(player.firstAt || 0).getTime();
+        const last = new Date(player.lastAt || 0).getTime();
+        if (!player.firstAt || when < first) player.firstAt = entry?.timestamp || player.firstAt;
+        if (!player.lastAt || when > last) player.lastAt = entry?.timestamp || player.lastAt;
+      }
+
+      for (const player of players.values()) {
+        if (player.teamKills <= 0) continue;
+        const lastMs = new Date(player.lastAt || 0).getTime();
+        const showByRange = match.active || (Number.isFinite(lastMs) && lastMs >= cutoff) || (match.endAt && new Date(match.endAt).getTime() >= cutoff);
+        if (!showByRange) continue;
+
+        cases.push({
+          ...player,
+          match,
+          actionSafe: permanentBanReady && Boolean(player.id) && (match.hasStart || match.hasEnd),
+          decision: decision(player.teamKills)
+        });
+      }
+    }
+
+    cases.sort((a, b) => {
+      const timeDiff = new Date(b.lastAt || 0) - new Date(a.lastAt || 0);
+      if (timeDiff !== 0) return timeDiff;
+      return b.teamKills - a.teamKills;
+    });
+
+    return { cases, excludedPermanent };
+  }
+
+  function abilityBreakdown(abilities) {
+    return [...abilities.entries()]
+      .sort((a, b) => (b[1].teamKills - a[1].teamKills) || (b[1].enemyKills - a[1].enemyKills))
+      .map(([name, stats]) => `${name}: ${stats.teamKills} TK / ${stats.enemyKills} enemy`)
+      .join(' • ');
+  }
+
+  function matchLabel(match) {
+    const map = match.mapName || 'Unknown map';
+    const mode = match.gameMode || '';
+    return `${map}${mode ? ` — ${mode}` : ''}`;
+  }
+
+  function actionDisabledReason(item) {
+    if (!permanentBanReady) return 'Permanent-ban list could not be checked.';
+    if (!item.id) return 'No player ID is available for this log entry.';
+    if (!item.match.hasStart && !item.match.hasEnd) return 'Match boundary is missing from the available logs, so automatic moderation is disabled to avoid mixing multiple matches.';
+    return '';
   }
 
   async function apiAction(url, body) {
@@ -203,92 +357,73 @@
     return data;
   }
 
-  function warningMessage(incident) {
-    if (incident.teamKills >= 5) {
-      return `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkills.\nYou are being removed from the server for commander-ability teamkilling.\n10 or more teamkills from one commander ability results in a 3-hour temporary ban.\n\nCheck friendly positions before using commander abilities.`;
+  function warningMessage(item, kicked = false) {
+    const match = matchLabel(item.match);
+    if (kicked) {
+      return `[ 1ST M.I. COMMANDER WARNING ]\n\nIn this match (${match}), your commander abilities caused ${item.teamKills} teamkills.\nYou are being KICKED for commander-ability teamkilling.\n\n10+ commander-ability teamkills in a single match results in a 3-hour temporary ban.`;
     }
-
-    return `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkill${incident.teamKills === 1 ? '' : 's'}.\nThis is a warning.\n5 or more teamkills from one commander ability results in a kick.\n10 or more results in a 3-hour temporary ban.\n\nCheck friendly positions before using commander abilities.`;
+    return `[ 1ST M.I. COMMANDER WARNING ]\n\nIn this match (${match}), your commander abilities caused ${item.teamKills} teamkill${item.teamKills === 1 ? '' : 's'}.\n\nTHIS IS A WARNING.\n5-9 commander-ability teamkills in one match results in a kick.\n10+ in one match results in a 3-hour temporary ban.`;
   }
 
-  async function warnPlayer(incident, button) {
-    if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot warn them automatically.');
-      return;
-    }
-
-    if (!confirm(`Send a commander-ability warning to ${incident.name}?\n\n${incident.teamKills} teamkill(s)`)) return;
-
-    const oldText = button.textContent;
+  async function warnPlayer(item, button) {
+    if (!confirm(`Warn ${item.name}?\n\n${item.teamKills} commander-ability teamkill(s) in ${matchLabel(item.match)}`)) return;
+    const old = button.textContent;
     button.disabled = true;
     button.textContent = 'Sending...';
     try {
-      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message: warningMessage(incident) });
-      if (typeof window.toast === 'function') window.toast(`Warning sent to ${incident.name}`);
-      else alert(`Warning sent to ${incident.name}.`);
+      await apiAction(`/api/v2/players/${encodeURIComponent(item.id)}/message`, { message: warningMessage(item, false) });
+      if (typeof window.toast === 'function') window.toast(`Warning sent to ${item.name}`);
+      else alert(`Warning sent to ${item.name}.`);
     } catch (error) {
-      if (typeof window.toast === 'function') window.toast(error.message, 'error');
-      else alert(error.message);
+      if (typeof window.toast === 'function') window.toast(error.message || String(error), 'error');
+      else alert(error.message || String(error));
     } finally {
       button.disabled = false;
-      button.textContent = oldText;
+      button.textContent = old;
     }
   }
 
-  async function warnAndKickPlayer(incident, button) {
-    if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot warn and kick them automatically.');
-      return;
-    }
-
-    const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills)`;
-    if (!confirm(`Warn and kick ${incident.name}?\n\n${incident.teamKills} commander-ability teamkills is within the 5-9 kick threshold.`)) return;
-
-    const oldText = button.textContent;
+  async function warnAndKickPlayer(item, button) {
+    const reason = `Commander ability teamkilling in ${matchLabel(item.match)}: ${item.teamKills} teamkills this match (${item.enemyKills} enemy kills)`;
+    if (!confirm(`Warn and kick ${item.name}?\n\n${item.teamKills} commander-ability teamkills in this match.`)) return;
+    const old = button.textContent;
     button.disabled = true;
     button.textContent = 'Warning & Kicking...';
     try {
-      // Send the warning before the kick so the player can see the escalation notice.
-      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message: warningMessage(incident) });
-      await apiAction('/api/v2/kick', { player_id: incident.id, reason });
-      if (typeof window.toast === 'function') window.toast(`${incident.name} warned and kicked`);
-      else alert(`${incident.name} warned and kicked.`);
+      await apiAction(`/api/v2/players/${encodeURIComponent(item.id)}/message`, { message: warningMessage(item, true) }).catch(() => {});
+      await apiAction('/api/v2/kick', { player_id: item.id, reason });
+      if (typeof window.toast === 'function') window.toast(`${item.name} warned and kicked`);
+      else alert(`${item.name} warned and kicked.`);
     } catch (error) {
-      if (typeof window.toast === 'function') window.toast(error.message, 'error');
-      else alert(error.message);
+      if (typeof window.toast === 'function') window.toast(error.message || String(error), 'error');
+      else alert(error.message || String(error));
     } finally {
       button.disabled = false;
-      button.textContent = oldText;
+      button.textContent = old;
     }
   }
 
-  async function tempBanPlayer(incident, button) {
-    if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot temporarily ban them automatically.');
-      return;
-    }
-
-    const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills)`;
-    if (!confirm(`Temporarily ban ${incident.name} for 3 hours?\n\n${incident.teamKills} commander-ability teamkills meets the 10+ temporary-ban threshold.\n\n${reason}`)) return;
-
-    const oldText = button.textContent;
+  async function tempBanPlayer(item, button) {
+    const reason = `Commander ability teamkilling in ${matchLabel(item.match)}: ${item.teamKills} teamkills this match (${item.enemyKills} enemy kills) — 3-hour temporary ban`;
+    if (!confirm(`Temporarily ban ${item.name} for 3 hours?\n\n${item.teamKills} commander-ability teamkills in this match meets the 10+ threshold.`)) return;
+    const old = button.textContent;
     button.disabled = true;
     button.textContent = 'Banning 3 Hours...';
     try {
       await apiAction('/api/v2/temp-ban', {
-        player_id: incident.id,
+        player_id: item.id,
         duration: 3,
         reason,
         admin_name: '1st M.I. Admin'
       });
-      if (typeof window.toast === 'function') window.toast(`${incident.name} temporarily banned for 3 hours`);
-      else alert(`${incident.name} temporarily banned for 3 hours.`);
+      if (typeof window.toast === 'function') window.toast(`${item.name} temporarily banned for 3 hours`);
+      else alert(`${item.name} temporarily banned for 3 hours.`);
     } catch (error) {
-      if (typeof window.toast === 'function') window.toast(error.message, 'error');
-      else alert(error.message);
+      if (typeof window.toast === 'function') window.toast(error.message || String(error), 'error');
+      else alert(error.message || String(error));
     } finally {
       button.disabled = false;
-      button.textContent = oldText;
+      button.textContent = old;
     }
   }
 
@@ -297,7 +432,6 @@
     const rows = $('#adminLogRows');
     if (!rows || $('#commanderTkWatch')) return false;
 
-    injectStyle();
     const panel = document.createElement('section');
     panel.id = 'commanderTkWatch';
     panel.className = 'cmdtk-watch';
@@ -305,12 +439,12 @@
       <div class="cmdtk-head">
         <div>
           <div class="eyebrow">COMMANDER ABILITY REVIEW</div>
-          <h4>Commander Call-in Teamkills</h4>
-          <div class="muted">0-4 ability teamkills = warning of a kick. 5-9 = warning plus kick, with notice that 10+ results in a temporary ban. 10+ = 3-hour temporary ban.</div>
+          <h4>Commander Call-in Teamkills — Per Match</h4>
+          <div class="muted">Thresholds reset every match. 0-4 ability teamkills in one match = warning. 5-9 = warning + kick. 10+ = 3-hour temporary ban.</div>
         </div>
         <button id="commanderTkRefresh" type="button" class="btn ghost small">Refresh</button>
       </div>
-      <div id="commanderTkSummary" class="cmdtk-summary muted">Loading commander ability incidents…</div>
+      <div id="commanderTkSummary" class="cmdtk-summary muted">Loading per-match commander ability totals…</div>
       <div id="commanderTkList" class="cmdtk-list"><div class="cmdtk-empty">Loading…</div></div>`;
 
     if (existingMonitor) existingMonitor.insertAdjacentElement('afterend', panel);
@@ -327,98 +461,113 @@
     if (loading || !$('#commanderTkWatch')) return;
     loading = true;
     try {
-      const seconds = $('#logRange')?.value || '3600';
-      const response = await fetch(`/api/v2/logs?seconds=${encodeURIComponent(seconds)}`, {
-        credentials: 'include',
-        cache: 'no-store'
-      });
-      const text = await response.text();
+      const selectedSeconds = Number($('#logRange')?.value || 3600);
+      const fetchSeconds = Math.max(selectedSeconds, MIN_MATCH_LOOKBACK_SECONDS);
+      const [logResponse] = await Promise.all([
+        fetch(`/api/v2/logs?seconds=${encodeURIComponent(fetchSeconds)}`, {
+          credentials: 'include',
+          cache: 'no-store'
+        }),
+        loadPermanentBans()
+      ]);
+
+      const text = await logResponse.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
-      if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
+      if (!logResponse.ok) throw new Error(data?.error || data?.detail || text || `${logResponse.status} ${logResponse.statusText}`);
       events = Array.isArray(data?.entries) ? data.entries : [];
-      render();
+      render(selectedSeconds);
     } catch (error) {
-      $('#commanderTkSummary').textContent = 'Could not load commander ability incidents.';
+      $('#commanderTkSummary').textContent = 'Could not load commander ability match totals.';
       $('#commanderTkList').innerHTML = `<div class="cmdtk-empty">${esc(error.message || error)}</div>`;
     } finally {
       loading = false;
     }
   }
 
-  function render() {
+  function render(selectedSeconds = Number($('#logRange')?.value || 3600)) {
     const summary = $('#commanderTkSummary');
     const list = $('#commanderTkList');
     if (!summary || !list) return;
 
-    const incidents = buildIncidents(events);
-    const decisions = incidents.map((incident) => decision(incident));
-    const warningCases = decisions.filter((result) => result.warn && !result.kick).length;
-    const kickCases = decisions.filter((result) => result.kick).length;
-    const tempBanCases = decisions.filter((result) => result.tempBan).length;
-    summary.textContent = `${incidents.length} commander incident(s) with friendly kills • ${warningCases} kick-warning case(s) • ${kickCases} warn-and-kick case(s) • ${tempBanCases} three-hour temp-ban case(s).`;
+    const result = buildMatchCases(events, selectedSeconds);
+    lastCases = result.cases;
 
-    if (!incidents.length) {
-      list.innerHTML = '<div class="cmdtk-empty">No commander-ability teamkill incidents in the selected log period.</div>';
+    const counts = { warn: 0, kick: 0, ban: 0 };
+    for (const item of lastCases) counts[item.decision.level] += 1;
+
+    const banStatus = permanentBanReady
+      ? `${result.excludedPermanent} permanent-ban commander kill event${result.excludedPermanent === 1 ? '' : 's'} hidden`
+      : 'permanent-ban list unavailable — actions disabled';
+
+    summary.textContent = `${lastCases.length} player/match commander teamkill case${lastCases.length === 1 ? '' : 's'} • ${counts.warn} warning • ${counts.kick} warn-and-kick • ${counts.ban} three-hour temp-ban • ${banStatus}. Thresholds reset at each match boundary.`;
+
+    if (!lastCases.length) {
+      list.innerHTML = '<div class="cmdtk-empty">No commander-ability teamkill cases in the selected match period.</div>';
       return;
     }
 
-    list.innerHTML = incidents.map((incident, index) => {
-      const result = decision(incident);
-      const enemyNames = incident.enemies.slice(0, 6).join(', ') || 'None';
-      const friendlyNames = incident.friendlies.slice(0, 6).join(', ') || 'None';
+    list.innerHTML = lastCases.map((item, index) => {
+      const resultDecision = item.decision;
+      const disabledReason = actionDisabledReason(item);
+      const disabled = Boolean(disabledReason);
+      const abilityText = abilityBreakdown(item.abilities) || 'Unknown commander ability';
+      const friendlyNames = item.friendlies.slice(0, 8).join(', ') || 'None';
+      const enemyNames = item.enemies.slice(0, 8).join(', ') || 'None';
+      const matchStatus = item.match.active ? 'CURRENT MATCH' : (item.match.hasEnd ? 'MATCH ENDED' : 'PARTIAL MATCH');
+      const boundaryText = item.match.hasStart
+        ? `Started ${localTime(item.match.startAt)}`
+        : 'Match start is outside the available log window';
+      const endText = item.match.hasEnd && item.match.endAt ? ` • Ended ${localTime(item.match.endAt)}` : '';
 
-      const policyText = result.tempBan
-        ? '10+ ability teamkills — 3-hour temporary-ban threshold reached'
-        : result.kick
-          ? '5-9 ability teamkills — warning plus kick; 10+ results in a 3-hour temporary ban'
-          : '0-4 ability teamkills — warning that 5+ results in a kick';
-
-      const actions = [];
-      if (result.tempBan) {
-        actions.push(`<button type="button" class="btn danger small cmdtk-tempban" data-index="${index}" ${incident.id ? '' : 'disabled'}>3-Hour Temp Ban</button>`);
-      } else if (result.kick) {
-        actions.push(`<button type="button" class="btn danger small cmdtk-warnkick" data-index="${index}" ${incident.id ? '' : 'disabled'}>Warn & Kick</button>`);
-      } else if (result.warn) {
-        actions.push(`<button type="button" class="btn ghost small cmdtk-warn" data-index="${index}" ${incident.id ? '' : 'disabled'}>Send Kick Warning</button>`);
+      let action = '';
+      if (resultDecision.level === 'ban') {
+        action = `<button type="button" class="btn danger small cmdtk-match-ban" data-index="${index}" ${disabled ? 'disabled' : ''} title="${esc(disabledReason)}">3-Hour Temp Ban</button>`;
+      } else if (resultDecision.level === 'kick') {
+        action = `<button type="button" class="btn danger small cmdtk-match-kick" data-index="${index}" ${disabled ? 'disabled' : ''} title="${esc(disabledReason)}">Warn & Kick</button>`;
+      } else {
+        action = `<button type="button" class="btn ghost small cmdtk-match-warn" data-index="${index}" ${disabled ? 'disabled' : ''} title="${esc(disabledReason)}">Send Kick Warning</button>`;
       }
 
       return `
-        <article class="cmdtk-card ${esc(result.severity)}" data-cmdtk-index="${index}">
+        <article class="cmdtk-card ${esc(resultDecision.level)}" data-cmdtk-index="${index}">
           <div class="cmdtk-top">
             <div>
-              <div class="cmdtk-name">${esc(incident.name)} — ${esc(incident.ability)}</div>
-              ${incident.id ? `<div class="cmdtk-id">${esc(incident.id)}</div>` : ''}
+              <div class="cmdtk-name">${esc(item.name)}</div>
+              ${item.id ? `<div class="cmdtk-id">${esc(item.id)}</div>` : ''}
+              <div class="cmdtk-match-label">${esc(matchLabel(item.match))} • ${esc(matchStatus)}</div>
             </div>
-            <span class="cmdtk-badge ${esc(result.severity)}">${esc(result.label)}</span>
+            <span class="cmdtk-badge ${esc(resultDecision.level)}">${esc(resultDecision.label)}</span>
           </div>
-          <div class="cmdtk-line"><span class="cmdtk-label">Result:</span> ${incident.enemyKills} enemy kill(s) • ${incident.teamKills} teamkill(s)</div>
-          <div class="cmdtk-line"><span class="cmdtk-label">Policy:</span> ${esc(policyText)}</div>
-          <div class="cmdtk-line"><span class="cmdtk-label">Enemy victims:</span> ${esc(enemyNames)}</div>
+          <div class="cmdtk-line"><span class="cmdtk-label">This match:</span> ${item.teamKills} commander-ability teamkill(s) • ${item.enemyKills} enemy kill(s)</div>
+          <div class="cmdtk-line"><span class="cmdtk-label">Abilities:</span> ${esc(abilityText)}</div>
+          <div class="cmdtk-line"><span class="cmdtk-label">Policy:</span> ${esc(resultDecision.policy)}</div>
           <div class="cmdtk-line"><span class="cmdtk-label">Friendly victims:</span> ${esc(friendlyNames)}</div>
-          <div class="cmdtk-times">${esc(localTime(incident.firstAt))}${incident.lastAt && incident.lastAt !== incident.firstAt ? ` → ${esc(localTime(incident.lastAt))}` : ''}</div>
-          ${actions.length ? `<div class="cmdtk-actions">${actions.join('')}</div>` : ''}
+          <div class="cmdtk-line"><span class="cmdtk-label">Enemy victims:</span> ${esc(enemyNames)}</div>
+          <div class="cmdtk-times">${esc(boundaryText)}${esc(endText)} • TK activity ${esc(localTime(item.firstAt))}${item.lastAt && item.lastAt !== item.firstAt ? ` → ${esc(localTime(item.lastAt))}` : ''}</div>
+          ${disabledReason ? `<div class="cmdtk-action-note muted">${esc(disabledReason)}</div>` : ''}
+          <div class="cmdtk-actions">${action}</div>
         </article>`;
     }).join('');
 
-    list.querySelectorAll('.cmdtk-warn').forEach((button) => {
+    list.querySelectorAll('.cmdtk-match-warn').forEach((button) => {
       button.addEventListener('click', () => {
-        const incident = incidents[Number(button.dataset.index)];
-        if (incident) warnPlayer(incident, button);
+        const item = lastCases[Number(button.dataset.index)];
+        if (item) warnPlayer(item, button);
       });
     });
 
-    list.querySelectorAll('.cmdtk-warnkick').forEach((button) => {
+    list.querySelectorAll('.cmdtk-match-kick').forEach((button) => {
       button.addEventListener('click', () => {
-        const incident = incidents[Number(button.dataset.index)];
-        if (incident) warnAndKickPlayer(incident, button);
+        const item = lastCases[Number(button.dataset.index)];
+        if (item) warnAndKickPlayer(item, button);
       });
     });
 
-    list.querySelectorAll('.cmdtk-tempban').forEach((button) => {
+    list.querySelectorAll('.cmdtk-match-ban').forEach((button) => {
       button.addEventListener('click', () => {
-        const incident = incidents[Number(button.dataset.index)];
-        if (incident) tempBanPlayer(incident, button);
+        const item = lastCases[Number(button.dataset.index)];
+        if (item) tempBanPlayer(item, button);
       });
     });
   }
