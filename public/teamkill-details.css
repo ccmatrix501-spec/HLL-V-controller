@@ -2,14 +2,17 @@
 #logs .tk-card-summary,#logs .admin-tk-group-summary{pointer-events:auto!important;position:relative;z-index:1;touch-action:manipulation}
 #logs .tk-card-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;cursor:pointer;list-style:none;user-select:none}
 #logs .tk-card-summary::-webkit-details-marker{display:none}
+#logs .tk-card-summary::marker{content:''}
 #logs .tk-card-summary:hover{background:#151b17}
 #logs .tk-card-summary:focus-visible,#logs .admin-tk-group-summary:focus-visible{outline:2px solid #d9b95f;outline-offset:-2px}
-#logs .tk-card-player{display:grid;gap:2px;min-width:0}
-#logs .tk-card-summary-right{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-width:0}
+#logs .tk-card-player{display:grid;gap:2px;min-width:0;pointer-events:none}
+#logs .tk-card-summary-right{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-width:0;pointer-events:none}
 #logs .tk-card-latest{font-size:.67rem;color:#7f8a80;white-space:nowrap}
 #logs .tk-card-chevron{font-size:1.05rem;color:#aeb7ad;transition:transform .15s ease;line-height:1}
-#logs .tk-card-detail[open] .tk-card-chevron{transform:rotate(180deg)}
-#logs .tk-card-detail[open]{border-color:rgba(221,88,80,.56);background:#111713}
+#logs .tk-card-detail[open] .tk-card-chevron,#logs .tk-card-detail.is-open .tk-card-chevron{transform:rotate(180deg)}
+#logs .tk-card-detail[open],#logs .tk-card-detail.is-open{border-color:rgba(221,88,80,.56);background:#111713}
+#logs .tk-card-detail:not([open])>.tk-card-body{display:none!important}
+#logs .tk-card-detail[open]>.tk-card-body{display:block!important}
 #logs .tk-card-body{padding:0 12px 12px;border-top:1px solid rgba(203,75,69,.2)}
 #logs .tk-event-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:8px;margin-top:10px}
 #logs .tk-event-card{padding:10px;border:1px solid #303a32;border-radius:9px;background:#0d120f;min-width:0}
