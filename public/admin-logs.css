@@ -25,6 +25,34 @@
 #logs .admin-log-teamkill-pane{align-content:start}
 #logs .admin-log-teamkill-empty{padding:28px;text-align:center;color:#89958a;border:1px dashed #313a33;border-radius:10px;background:#101512}
 
+/* Grouped Teamkill logs inside normal Admin Logs */
+#logs .admin-log-rows.teamkill-group-mode{display:block;max-height:64vh}
+#logs .admin-tk-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;align-items:start}
+#logs .admin-tk-group{border:1px solid rgba(203,75,69,.36);border-radius:11px;background:#0f1411;overflow:hidden}
+#logs .admin-tk-group[open]{grid-column:1/-1;border-color:rgba(221,88,80,.56);background:#111713}
+#logs .admin-tk-group-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;cursor:pointer;list-style:none;user-select:none}
+#logs .admin-tk-group-summary::-webkit-details-marker{display:none}
+#logs .admin-tk-group-summary:hover{background:#151b17}
+#logs .admin-tk-group-player{display:grid;gap:2px;min-width:0}
+#logs .admin-tk-group-player strong{font-size:.86rem;color:#f2f4f0;overflow-wrap:anywhere}
+#logs .admin-tk-group-id{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.65rem;color:#788278;word-break:break-all}
+#logs .admin-tk-group-right{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-width:0}
+#logs .admin-tk-count{font-size:.72rem;font-weight:900;color:#ff9993;border:1px solid #6e3835;border-radius:999px;padding:4px 8px;background:#261514;white-space:nowrap}
+#logs .admin-tk-latest{font-size:.67rem;color:#7f8a80;white-space:nowrap}
+#logs .admin-tk-chevron{font-size:1.05rem;color:#aeb7ad;transition:transform .15s ease;line-height:1}
+#logs .admin-tk-group[open] .admin-tk-chevron{transform:rotate(180deg)}
+#logs .admin-tk-event-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px;padding:0 10px 10px;border-top:1px solid rgba(203,75,69,.2)}
+#logs .admin-tk-event{padding:10px;border:1px solid #303a32;border-radius:9px;background:#0d120f;margin-top:9px;min-width:0}
+#logs .admin-tk-event-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+#logs .admin-tk-victim{font-size:.78rem;color:#c3cbc3;min-width:0;overflow-wrap:anywhere}
+#logs .admin-tk-victim strong{color:#f1f3ef}
+#logs .admin-tk-event-top time{font-size:.66rem;color:#79837a;white-space:nowrap}
+#logs .admin-tk-event-weapon{margin-top:6px;font-size:.75rem;font-weight:800;color:#d9b95f;overflow-wrap:anywhere}
+#logs .admin-tk-event-id{margin-top:4px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.64rem;color:#747f75;word-break:break-all}
+#logs .admin-tk-raw{margin-top:7px;font-size:.68rem;color:#879188}
+#logs .admin-tk-raw summary{cursor:pointer;color:#a5afa6}
+#logs .admin-tk-raw code{display:block;margin-top:6px;padding:8px;border-radius:7px;background:#090d0a;white-space:pre-wrap;word-break:break-word;color:#9aa49b}
+
 /* Teamkill Watch cards */
 #logs .tk-watch,#logs .cmdtk-watch{margin:0!important;padding:16px;border-radius:12px;background:#111613}
 #logs .tk-watch{border:1px solid rgba(203,75,69,.42)}
@@ -94,6 +122,11 @@
   #logs .admin-log-subtabs{grid-template-columns:1fr}
   #logs .tk-watch-head,#logs .cmdtk-head{display:grid}
   #logs .tk-watch-controls{width:100%}
+  #logs .admin-tk-groups{grid-template-columns:1fr}
+  #logs .admin-tk-group-summary,#logs .admin-tk-event-top{align-items:flex-start}
+  #logs .admin-tk-group-right{flex-wrap:wrap;justify-content:flex-end}
+  #logs .admin-tk-latest{display:none}
+  #logs .admin-tk-event-list{grid-template-columns:1fr}
   #access .record-name-row,#bans .record-name-row{grid-template-columns:1fr}
   #access .record-name-actions,#bans .record-name-actions{grid-column:auto;justify-content:flex-start}
   #access .record-name-editor [data-record-list],#bans .record-name-editor [data-record-list]{max-height:none}
