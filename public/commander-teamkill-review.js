@@ -132,48 +132,40 @@
   }
 
   // 1st M.I. commander-call-in escalation policy:
-  // - 10+ teamkills from one ability incident => permanent ban.
-  // - 5-9 teamkills => warning. The earlier kick-efficiency rule still applies,
-  //   so a 5-9 TK incident may be WARNING + KICK when it also fails that rule.
-  // - Under 5 teamkills => kick if fewer than 2 enemy kills OR TKs exceed enemy kills.
+  // - 0-4 teamkills => warning that further ability teamkills will result in a kick.
+  // - 5-9 teamkills => kick plus warning that 10+ results in a 3-hour temporary ban.
+  // - 10+ teamkills => 3-hour temporary ban.
+  // Commander-ability teamkills remain separate from normal repeat-teamkill ban logic.
   function decision(incident) {
     if (incident.teamKills >= 10) {
       return {
-        ban: true,
-        warn: false,
+        tempBan: true,
         kick: false,
-        label: 'BAN',
+        warn: false,
+        label: '3H TEMP BAN',
         severity: 'ban',
-        reason: `${incident.teamKills} commander-ability teamkills meets the 10+ permanent-ban threshold`
+        reason: `${incident.teamKills} commander-ability teamkills meets the 10+ three-hour temporary-ban threshold`
       };
     }
 
-    const kick = incident.enemyKills < 2 || incident.teamKills > incident.enemyKills;
-
     if (incident.teamKills >= 5) {
       return {
-        ban: false,
+        tempBan: false,
+        kick: true,
         warn: true,
-        kick,
-        label: kick ? 'WARNING + KICK' : 'WARNING',
-        severity: kick ? 'kick' : 'warn',
-        reason: kick
-          ? `${incident.teamKills} commander-ability teamkills meets the warning threshold; strike also fails the kill-efficiency rule`
-          : `${incident.teamKills} commander-ability teamkills meets the 5+ warning threshold`
+        label: 'KICK + TEMP BAN WARNING',
+        severity: 'kick',
+        reason: `${incident.teamKills} commander-ability teamkills is within the 5-9 kick threshold; 10+ results in a three-hour temporary ban`
       };
     }
 
     return {
-      ban: false,
-      warn: false,
-      kick,
-      label: kick ? 'KICK' : 'NO ACTION',
-      severity: kick ? 'kick' : 'ok',
-      reason: incident.enemyKills < 2
-        ? `Only ${incident.enemyKills} enemy kill${incident.enemyKills === 1 ? '' : 's'}`
-        : incident.teamKills > incident.enemyKills
-          ? `Teamkills exceed enemy kills (${incident.teamKills} > ${incident.enemyKills})`
-          : `Enemy kills meet policy (${incident.enemyKills} enemy / ${incident.teamKills} friendly)`
+      tempBan: false,
+      kick: false,
+      warn: true,
+      label: 'KICK WARNING',
+      severity: 'warn',
+      reason: `${incident.teamKills} commander-ability teamkill${incident.teamKills === 1 ? '' : 's'} — warning issued; 5+ results in a kick`
     };
   }
 
@@ -211,20 +203,27 @@
     return data;
   }
 
+  function warningMessage(incident) {
+    if (incident.teamKills >= 5) {
+      return `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkills.\nYou are being removed from the server for commander-ability teamkilling.\n10 or more teamkills from one commander ability results in a 3-hour temporary ban.\n\nCheck friendly positions before using commander abilities.`;
+    }
+
+    return `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkill${incident.teamKills === 1 ? '' : 's'}.\nThis is a warning.\n5 or more teamkills from one commander ability results in a kick.\n10 or more results in a 3-hour temporary ban.\n\nCheck friendly positions before using commander abilities.`;
+  }
+
   async function warnPlayer(incident, button) {
     if (!incident.id) {
       alert('This log incident does not include a player ID, so the controller cannot warn them automatically.');
       return;
     }
 
-    const message = `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkills.\nCommander abilities reaching 5 teamkills receive a warning.\n10 teamkills from an ability can result in a permanent ban.\n\nWatch friendly positions before using commander abilities.`;
     if (!confirm(`Send a commander-ability warning to ${incident.name}?\n\n${incident.teamKills} teamkill(s)`)) return;
 
     const oldText = button.textContent;
     button.disabled = true;
     button.textContent = 'Sending...';
     try {
-      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message });
+      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message: warningMessage(incident) });
       if (typeof window.toast === 'function') window.toast(`Warning sent to ${incident.name}`);
       else alert(`Warning sent to ${incident.name}.`);
     } catch (error) {
@@ -236,22 +235,24 @@
     }
   }
 
-  async function kickPlayer(incident, button) {
+  async function warnAndKickPlayer(incident, button) {
     if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot kick them automatically.');
+      alert('This log incident does not include a player ID, so the controller cannot warn and kick them automatically.');
       return;
     }
-    const result = decision(incident);
-    const reason = `Commander ability misuse: ${incident.ability} — ${incident.enemyKills} enemy kill(s), ${incident.teamKills} teamkill(s)`;
-    if (!confirm(`Kick ${incident.name}?\n\n${result.reason}\n\n${reason}`)) return;
+
+    const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills)`;
+    if (!confirm(`Warn and kick ${incident.name}?\n\n${incident.teamKills} commander-ability teamkills is within the 5-9 kick threshold.`)) return;
 
     const oldText = button.textContent;
     button.disabled = true;
-    button.textContent = 'Kicking...';
+    button.textContent = 'Warning & Kicking...';
     try {
+      // Send the warning before the kick so the player can see the escalation notice.
+      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message: warningMessage(incident) });
       await apiAction('/api/v2/kick', { player_id: incident.id, reason });
-      if (typeof window.toast === 'function') window.toast(`${incident.name} kicked`);
-      else alert(`${incident.name} kicked.`);
+      if (typeof window.toast === 'function') window.toast(`${incident.name} warned and kicked`);
+      else alert(`${incident.name} warned and kicked.`);
     } catch (error) {
       if (typeof window.toast === 'function') window.toast(error.message, 'error');
       else alert(error.message);
@@ -261,26 +262,27 @@
     }
   }
 
-  async function banPlayer(incident, button) {
+  async function tempBanPlayer(incident, button) {
     if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot ban them automatically.');
+      alert('This log incident does not include a player ID, so the controller cannot temporarily ban them automatically.');
       return;
     }
 
     const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills)`;
-    if (!confirm(`Permanently ban ${incident.name}?\n\n${incident.teamKills} commander-ability teamkills meets the 10+ ban threshold.\n\n${reason}`)) return;
+    if (!confirm(`Temporarily ban ${incident.name} for 3 hours?\n\n${incident.teamKills} commander-ability teamkills meets the 10+ temporary-ban threshold.\n\n${reason}`)) return;
 
     const oldText = button.textContent;
     button.disabled = true;
-    button.textContent = 'Banning...';
+    button.textContent = 'Banning 3 Hours...';
     try {
-      await apiAction('/api/v2/perma-ban', {
+      await apiAction('/api/v2/temp-ban', {
         player_id: incident.id,
+        duration: 3,
         reason,
         admin_name: '1st M.I. Admin'
       });
-      if (typeof window.toast === 'function') window.toast(`${incident.name} permanently banned`);
-      else alert(`${incident.name} permanently banned.`);
+      if (typeof window.toast === 'function') window.toast(`${incident.name} temporarily banned for 3 hours`);
+      else alert(`${incident.name} temporarily banned for 3 hours.`);
     } catch (error) {
       if (typeof window.toast === 'function') window.toast(error.message, 'error');
       else alert(error.message);
@@ -304,7 +306,7 @@
         <div>
           <div class="eyebrow">COMMANDER ABILITY REVIEW</div>
           <h4>Commander Call-in Teamkills</h4>
-          <div class="muted">5-9 ability teamkills = warning. 10+ = permanent ban. Below 5, the existing kick rule still applies when a strike gets fewer than 2 enemy kills or teamkills exceed enemy kills.</div>
+          <div class="muted">0-4 ability teamkills = warning of a kick. 5-9 = warning plus kick, with notice that 10+ results in a temporary ban. 10+ = 3-hour temporary ban.</div>
         </div>
         <button id="commanderTkRefresh" type="button" class="btn ghost small">Refresh</button>
       </div>
@@ -351,10 +353,10 @@
 
     const incidents = buildIncidents(events);
     const decisions = incidents.map((incident) => decision(incident));
-    const banCases = decisions.filter((result) => result.ban).length;
-    const warningCases = decisions.filter((result) => result.warn).length;
+    const warningCases = decisions.filter((result) => result.warn && !result.kick).length;
     const kickCases = decisions.filter((result) => result.kick).length;
-    summary.textContent = `${incidents.length} commander incident(s) with friendly kills • ${warningCases} warning case(s) • ${kickCases} kick case(s) • ${banCases} permanent-ban case(s).`;
+    const tempBanCases = decisions.filter((result) => result.tempBan).length;
+    summary.textContent = `${incidents.length} commander incident(s) with friendly kills • ${warningCases} kick-warning case(s) • ${kickCases} warn-and-kick case(s) • ${tempBanCases} three-hour temp-ban case(s).`;
 
     if (!incidents.length) {
       list.innerHTML = '<div class="cmdtk-empty">No commander-ability teamkill incidents in the selected log period.</div>';
@@ -365,16 +367,21 @@
       const result = decision(incident);
       const enemyNames = incident.enemies.slice(0, 6).join(', ') || 'None';
       const friendlyNames = incident.friendlies.slice(0, 6).join(', ') || 'None';
-      const policyText = result.ban
-        ? '10+ ability teamkills — permanent-ban threshold reached'
-        : result.warn
-          ? `5+ ability teamkills — warning threshold reached${result.kick ? '; kick rule also triggered' : ''}`
-          : result.reason;
+
+      const policyText = result.tempBan
+        ? '10+ ability teamkills — 3-hour temporary-ban threshold reached'
+        : result.kick
+          ? '5-9 ability teamkills — warning plus kick; 10+ results in a 3-hour temporary ban'
+          : '0-4 ability teamkills — warning that 5+ results in a kick';
 
       const actions = [];
-      if (result.warn) actions.push(`<button type="button" class="btn ghost small cmdtk-warn" data-index="${index}" ${incident.id ? '' : 'disabled'}>Send Warning</button>`);
-      if (result.kick && !result.ban) actions.push(`<button type="button" class="btn danger small cmdtk-kick" data-index="${index}" ${incident.id ? '' : 'disabled'}>Kick Player</button>`);
-      if (result.ban) actions.push(`<button type="button" class="btn danger small cmdtk-ban" data-index="${index}" ${incident.id ? '' : 'disabled'}>Permanently Ban</button>`);
+      if (result.tempBan) {
+        actions.push(`<button type="button" class="btn danger small cmdtk-tempban" data-index="${index}" ${incident.id ? '' : 'disabled'}>3-Hour Temp Ban</button>`);
+      } else if (result.kick) {
+        actions.push(`<button type="button" class="btn danger small cmdtk-warnkick" data-index="${index}" ${incident.id ? '' : 'disabled'}>Warn & Kick</button>`);
+      } else if (result.warn) {
+        actions.push(`<button type="button" class="btn ghost small cmdtk-warn" data-index="${index}" ${incident.id ? '' : 'disabled'}>Send Kick Warning</button>`);
+      }
 
       return `
         <article class="cmdtk-card ${esc(result.severity)}" data-cmdtk-index="${index}">
@@ -401,17 +408,17 @@
       });
     });
 
-    list.querySelectorAll('.cmdtk-kick').forEach((button) => {
+    list.querySelectorAll('.cmdtk-warnkick').forEach((button) => {
       button.addEventListener('click', () => {
         const incident = incidents[Number(button.dataset.index)];
-        if (incident) kickPlayer(incident, button);
+        if (incident) warnAndKickPlayer(incident, button);
       });
     });
 
-    list.querySelectorAll('.cmdtk-ban').forEach((button) => {
+    list.querySelectorAll('.cmdtk-tempban').forEach((button) => {
       button.addEventListener('click', () => {
         const incident = incidents[Number(button.dataset.index)];
-        if (incident) banPlayer(incident, button);
+        if (incident) tempBanPlayer(incident, button);
       });
     });
   }
