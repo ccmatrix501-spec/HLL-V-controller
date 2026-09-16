@@ -25,6 +25,80 @@
     }
   }
 
+  function installLoginFallback() {
+    const form = document.getElementById('loginForm');
+    const passwordInput = document.getElementById('loginPassword');
+    const error = document.getElementById('loginError');
+    if (!form || !passwordInput || form.dataset.failsafeLoginInstalled === '1') return;
+
+    form.dataset.failsafeLoginInstalled = '1';
+
+    // Capture the submit before any feature script. Login must remain usable even
+    // if app.js or another optional controller module throws during startup.
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const button = event.submitter || form.querySelector('button[type="submit"]');
+      const oldText = button?.textContent || 'Enter Controller';
+      const password = String(passwordInput.value || '');
+
+      if (!password) {
+        if (error) error.textContent = 'Enter the controller password.';
+        passwordInput.focus();
+        return;
+      }
+
+      if (error) error.textContent = '';
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Entering...';
+      }
+
+      try {
+        const response = await fetch('/controller/login', {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ password })
+        });
+
+        const raw = await response.text();
+        let data = null;
+        try { data = raw ? JSON.parse(raw) : null; } catch {}
+
+        if (!response.ok) {
+          throw new Error(data?.error || raw || `${response.status} ${response.statusText}`);
+        }
+
+        passwordInput.value = '';
+
+        // Confirm that the session cookie is actually accepted before reloading.
+        const statusResponse = await fetch('/controller/status', {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Accept': 'application/json' }
+        });
+        const status = await statusResponse.json().catch(() => null);
+        if (!statusResponse.ok || !status?.authenticated) {
+          throw new Error('Login succeeded but the controller session was not retained. Please retry.');
+        }
+
+        window.location.reload();
+      } catch (err) {
+        if (error) error.textContent = text(err?.message || err || 'Login failed');
+        if (button) {
+          button.disabled = false;
+          button.textContent = oldText;
+        }
+      }
+    }, true);
+  }
+
   function errorPanel() {
     let panel = document.getElementById('controllerBootError');
     if (panel) return panel;
@@ -137,8 +211,13 @@
     }, 0);
   });
 
+  // boot-failsafe.js is loaded after the login markup and before deferred feature
+  // scripts, so install the independent login path immediately.
+  installLoginFallback();
+
   document.addEventListener('DOMContentLoaded', () => {
     ensureBasePaint();
+    installLoginFallback();
 
     // The login shell should always be paintable before any network request.
     const login = document.getElementById('loginView');
