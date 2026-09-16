@@ -30,11 +30,10 @@
     const type = String(entry?.type || '').toUpperCase();
     if (type === 'ADMIN CAMERA') return true;
 
-    const haystack = [
-      entry?.log_class,
-      entry?.raw_message,
-      entry?.message
-    ].filter(Boolean).join(' ').toLowerCase();
+    const haystack = [entry?.log_class, entry?.raw_message, entry?.message]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
 
     return haystack.includes('admincamera') ||
       haystack.includes('admin camera') ||
@@ -45,39 +44,42 @@
   function summary(entry) {
     const t = entry.type || 'OTHER';
     switch (t) {
-      case 'CONNECT':
-        return `${entry.player_name || 'Unknown player'} connected`;
-      case 'DISCONNECT':
-        return `${entry.player_name || 'Unknown player'} disconnected`;
-      case 'KILL':
-        return `${entry.instigator_name || 'Unknown'} killed ${entry.victim_name || 'Unknown'}${entry.weapon_id ? ` with ${entry.weapon_id}` : ''}`;
-      case 'TEAM KILL':
-        return `${entry.instigator_name || 'Unknown'} TEAMKILLED ${entry.victim_name || 'Unknown'}${entry.weapon_id ? ` with ${entry.weapon_id}` : ''}`;
-      case 'CHAT':
-        return `[${entry.channel || 'Chat'}] ${entry.player_name || 'Unknown'}: ${entry.message || ''}`;
-      case 'MESSAGE':
-        return `Server message to ${entry.player_name || 'player'}: ${entry.message || ''}`;
-      case 'KICK':
-        return `${entry.player_name || 'Player'} was kicked${entry.reason ? ` — ${entry.reason}` : ''}`;
-      case 'BAN':
-        return `${entry.player_name || 'Player'} was banned${entry.reason ? ` — ${entry.reason}` : ''}`;
-      case 'TEAM SWITCH':
-        return `${entry.player_name || 'Player'} switched ${entry.old_team_name || 'None'} → ${entry.new_team_name || 'None'}`;
-      case 'MATCH START':
-        return `Match started: ${entry.map_name || ''} ${entry.game_mode_id || ''}`.trim();
-      case 'MATCH END':
-        return `Match ended: ${entry.map_name || ''} — Allies ${entry.allied_score ?? '?'} / Axis ${entry.axis_score ?? '?'}`;
-      case 'VOTE KICK':
-        return entry.raw_message || t;
-      default:
-        return entry.raw_message || entry.message || entry.log_class || 'Admin log event';
+      case 'CONNECT': return `${entry.player_name || 'Unknown player'} connected`;
+      case 'DISCONNECT': return `${entry.player_name || 'Unknown player'} disconnected`;
+      case 'KILL': return `${entry.instigator_name || 'Unknown'} killed ${entry.victim_name || 'Unknown'}${entry.weapon_id ? ` with ${entry.weapon_id}` : ''}`;
+      case 'TEAM KILL': return `${entry.instigator_name || 'Unknown'} TEAMKILLED ${entry.victim_name || 'Unknown'}${entry.weapon_id ? ` with ${entry.weapon_id}` : ''}`;
+      case 'CHAT': return `[${entry.channel || 'Chat'}] ${entry.player_name || 'Unknown'}: ${entry.message || ''}`;
+      case 'MESSAGE': return `Server message to ${entry.player_name || 'player'}: ${entry.message || ''}`;
+      case 'KICK': return `${entry.player_name || 'Player'} was kicked${entry.reason ? ` — ${entry.reason}` : ''}`;
+      case 'BAN': return `${entry.player_name || 'Player'} was banned${entry.reason ? ` — ${entry.reason}` : ''}`;
+      case 'TEAM SWITCH': return `${entry.player_name || 'Player'} switched ${entry.old_team_name || 'None'} → ${entry.new_team_name || 'None'}`;
+      case 'MATCH START': return `Match started: ${entry.map_name || ''} ${entry.game_mode_id || ''}`.trim();
+      case 'MATCH END': return `Match ended: ${entry.map_name || ''} — Allies ${entry.allied_score ?? '?'} / Axis ${entry.axis_score ?? '?'}`;
+      case 'VOTE KICK': return entry.raw_message || t;
+      default: return entry.raw_message || entry.message || entry.log_class || 'Admin log event';
     }
+  }
+
+  function adoptTeamkillPanels() {
+    const pane = $('#adminLogTeamkillPane');
+    if (!pane) return;
+
+    const repeat = $('#teamkillWatch');
+    const commander = $('#commanderTkWatch');
+
+    if (repeat && repeat.parentElement !== pane) pane.appendChild(repeat);
+    if (commander && commander.parentElement !== pane) pane.appendChild(commander);
+
+    const placeholder = pane.querySelector('.admin-log-teamkill-empty');
+    if (placeholder && (repeat || commander)) placeholder.remove();
   }
 
   function setSubtab(view) {
     const normal = $('#adminLogNormalPane');
     const teamkill = $('#adminLogTeamkillPane');
     if (!normal || !teamkill) return;
+
+    adoptTeamkillPanels();
 
     const target = view === 'teamkill' ? 'teamkill' : 'normal';
     normal.hidden = target !== 'normal';
@@ -110,7 +112,7 @@
         </button>
         <button type="button" class="admin-log-subtab" data-admin-log-subtab="teamkill" role="tab" aria-selected="false" tabindex="-1">
           <span class="admin-log-subtab-title">Teamkill Watch</span>
-          <span class="admin-log-subtab-note">Repeat teamkills and commander abilities</span>
+          <span class="admin-log-subtab-note">Repeat TKs and commander abilities</span>
         </button>
       </div>
 
@@ -154,6 +156,11 @@
       button.addEventListener('click', () => setSubtab(button.dataset.adminLogSubtab));
     });
 
+    // Teamkill scripts load after this file and historically inserted themselves
+    // above the normal log rows. Keep watching and move them into the Teamkill tab.
+    const observer = new MutationObserver(() => adoptTeamkillPanels());
+    observer.observe(viewer, { childList: true, subtree: true });
+
     let initial = 'normal';
     try {
       if (sessionStorage.getItem('hll-admin-log-subtab') === 'teamkill') initial = 'teamkill';
@@ -161,7 +168,12 @@
     setSubtab(initial);
 
     const nav = document.querySelector('[data-view="logs"]');
-    nav?.addEventListener('click', () => setTimeout(load, 0));
+    nav?.addEventListener('click', () => {
+      setTimeout(() => {
+        adoptTeamkillPanels();
+        load();
+      }, 0);
+    });
 
     const refresh = document.querySelector('[data-refresh="logs"]');
     refresh?.addEventListener('click', () => setTimeout(load, 0));
@@ -191,6 +203,7 @@
       entries = (Array.isArray(data?.entries) ? data.entries : []).filter(entry => !isAdminCameraEvent(entry));
       entries.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
       render();
+      adoptTeamkillPanels();
     } catch (error) {
       rows.innerHTML = `<div class="admin-log-empty error">${esc(error.message || error)}</div>`;
       $('#adminLogCount').textContent = '';
