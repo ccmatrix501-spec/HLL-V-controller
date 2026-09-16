@@ -2,6 +2,11 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const state = { authenticated:false, connected:false, qpanel:'https://qp.qonzer.com/', players:[], maps:[], server:null };
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const STATUS_REQUEST_TIMEOUT_MS = 8000;
+const RCON_STATUS_TIMEOUT_MS = 10000;
+const CONNECT_REQUEST_TIMEOUT_MS = 35000;
+
 function toast(message, type='ok'){const el=$('#toast');el.textContent=message;el.className=`toast show ${type==='error'?'error-toast':'ok-toast'}`;clearTimeout(window.__toast);window.__toast=setTimeout(()=>el.className='toast',3200)}
 function pretty(v){if(v===undefined||v===null)return '—';if(typeof v==='string')return v;return JSON.stringify(v,null,2)}
 function first(obj, keys, fallback='—'){for(const k of keys){if(obj && obj[k]!==undefined && obj[k]!==null && obj[k]!=='')return obj[k]}return fallback}
@@ -9,32 +14,52 @@ function asArray(data){if(Array.isArray(data))return data;if(!data||typeof data!
 function normalizeBool(v){return v===true||v==='true'||v==='1'||v===1}
 
 async function request(url, options={}){
-  const res=await fetch(url,{credentials:'include',...options,headers:{...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})}});
-  const text=await res.text();let data=text;try{data=text?JSON.parse(text):null}catch{}
-  if(res.status===401 && !url.startsWith('/controller/')){state.connected=false;updateConnection(false)}
-  if(!res.ok)throw new Error((data&&data.error)||`${res.status} ${res.statusText}`);
-  return data;
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), Math.max(1000, Number(timeoutMs)||DEFAULT_REQUEST_TIMEOUT_MS));
+  try{
+    const res=await fetch(url,{credentials:'include',...fetchOptions,signal:controller.signal,headers:{...(fetchOptions.body?{'Content-Type':'application/json'}:{}),...(fetchOptions.headers||{})}});
+    const text=await res.text();let data=text;try{data=text?JSON.parse(text):null}catch{}
+    if(res.status===401 && !url.startsWith('/controller/')){state.connected=false;updateConnection(false)}
+    if(!res.ok)throw new Error((data&&data.error)||`${res.status} ${res.statusText}`);
+    return data;
+  }catch(err){
+    if(err?.name==='AbortError')throw new Error(`Request timed out after ${Math.round((Number(timeoutMs)||DEFAULT_REQUEST_TIMEOUT_MS)/1000)} seconds`);
+    throw err;
+  }finally{clearTimeout(timer)}
 }
-async function post(url, body){return request(url,{method:'POST',body:JSON.stringify(body)})}
+async function post(url, body, timeoutMs){return request(url,{method:'POST',body:JSON.stringify(body),timeoutMs})}
 async function del(url, body){return request(url,{method:'DELETE',body:JSON.stringify(body)})}
 
 async function boot(){
-  try{const s=await request('/controller/status');state.authenticated=s.authenticated;state.qpanel=s.qpanel_url||state.qpanel;if(s.authenticated){showApp();await checkRcon()}else showLogin()}catch{showLogin()}
+  // Always leave the page in a usable state. RCON availability must never block
+  // the controller shell/login from rendering.
+  try{
+    const s=await request('/controller/status',{timeoutMs:STATUS_REQUEST_TIMEOUT_MS});
+    state.authenticated=Boolean(s.authenticated);
+    state.qpanel=s.qpanel_url||state.qpanel;
+    if(s.authenticated){showApp();void checkRcon()}else showLogin();
+  }catch(err){
+    state.authenticated=false;
+    showLogin();
+    const loginError=$('#loginError');
+    if(loginError)loginError.textContent=`Controller status unavailable: ${err.message}`;
+  }
 }
 function showLogin(){$('#loginView').classList.remove('hidden');$('#appView').classList.add('hidden')}
 function showApp(){$('#loginView').classList.add('hidden');$('#appView').classList.remove('hidden')}
 
-$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{await post('/controller/login',{password:$('#loginPassword').value});$('#loginPassword').value='';showApp();await checkRcon()}catch(err){$('#loginError').textContent=err.message}})
+$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';const submit=e.submitter||$('#loginForm button[type="submit"]');const oldText=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Entering...'}try{await post('/controller/login',{password:$('#loginPassword').value},STATUS_REQUEST_TIMEOUT_MS);$('#loginPassword').value='';state.authenticated=true;showApp();void checkRcon()}catch(err){$('#loginError').textContent=err.message}finally{if(submit){submit.disabled=false;submit.textContent=oldText||'Enter Controller'}}})
 $('#logoutBtn').addEventListener('click',async()=>{await post('/controller/logout',{}).catch(()=>{});location.reload()})
 function openQpanel(){window.open(state.qpanel,'_blank','noopener')};$('#qpanelBtn').onclick=openQpanel;$('#qpanelBtn2').onclick=openQpanel;
 
 $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{const v=btn.dataset.view;$$('.nav-item').forEach(x=>x.classList.toggle('active',x===btn));$$('.view').forEach(x=>x.classList.toggle('active',x.id===v));const titles={dashboard:'Server Dashboard',players:'Live Players',maps:'Map Control',access:'Admins & VIPs',bans:'Ban Management',settings:'Server Settings',logs:'Admin Logs'};$('#pageTitle').textContent=titles[v]||'Server Controller';if(state.connected)refreshView(v)}));
 
 function updateConnection(connected){state.connected=connected;const p=$('#connectionPill');p.className=`pill ${connected?'online':'offline'}`;p.textContent=connected?'RCON CONNECTED':'RCON DISCONNECTED';$('#connectBtn').textContent=connected?'Disconnect RCON':'Connect RCON';if(!connected){$('#statPlayerSub').textContent='No connection'}}
-async function checkRcon(){try{const s=await request('/api/v2/connection/status');updateConnection(Boolean(s.connected));if(s.connected){await refreshAllCore()}}catch{updateConnection(false)}}
+async function checkRcon(){try{const s=await request('/api/v2/connection/status',{timeoutMs:RCON_STATUS_TIMEOUT_MS});updateConnection(Boolean(s.connected));if(s.connected){void refreshAllCore()}}catch(err){updateConnection(false);console.warn('RCON status check failed:',err.message)}}
 $('#connectBtn').addEventListener('click',async()=>{if(state.connected){if(confirm('Disconnect this RCON session?')){try{await post('/api/v2/disconnect',{});updateConnection(false);toast('RCON disconnected')}catch(e){toast(e.message,'error')}}}else{$('#rconHost').value=localStorage.getItem('hll_rcon_host')||'';$('#rconPort').value=localStorage.getItem('hll_rcon_port')||'';$('#connectError').textContent='';$('#connectDialog').showModal()}})
 $$('[data-close-dialog]').forEach(b=>b.onclick=()=>$('#connectDialog').close())
-$('#connectForm').addEventListener('submit',async e=>{e.preventDefault();$('#connectError').textContent='';const host=$('#rconHost').value.trim(),port=Number($('#rconPort').value),password=$('#rconPassword').value;const submit=e.submitter||$('#connectForm button[type="submit"]');const oldText=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Connecting...'}try{await post('/api/v2/connect',{host,port,password});localStorage.setItem('hll_rcon_host',host);localStorage.setItem('hll_rcon_port',String(port));$('#rconPassword').value='';$('#connectDialog').close();updateConnection(true);toast('Connected to Hell Let Loose: Vietnam RCON');await refreshAllCore()}catch(err){$('#connectError').textContent=err.message}finally{if(submit){submit.disabled=false;submit.textContent=oldText||'Connect'}}})
+$('#connectForm').addEventListener('submit',async e=>{e.preventDefault();$('#connectError').textContent='';const host=$('#rconHost').value.trim(),port=Number($('#rconPort').value),password=$('#rconPassword').value;const submit=e.submitter||$('#connectForm button[type="submit"]');const oldText=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Connecting...'}try{await post('/api/v2/connect',{host,port,password},CONNECT_REQUEST_TIMEOUT_MS);localStorage.setItem('hll_rcon_host',host);localStorage.setItem('hll_rcon_port',String(port));$('#rconPassword').value='';$('#connectDialog').close();updateConnection(true);toast('Connected to Hell Let Loose: Vietnam RCON');void refreshAllCore()}catch(err){$('#connectError').textContent=err.message}finally{if(submit){submit.disabled=false;submit.textContent=oldText||'Connect'}}})
 
 async function refreshAllCore(){await Promise.allSettled([loadServer(),loadPlayers(),loadMaps(),loadRotation()])}
 async function loadServer(){if(!state.connected)return;try{const data=await request('/api/v2/server?type=session');state.server=data;$('#sessionRaw').textContent=pretty(data);const o=(data&&typeof data==='object')?data:{};const players=first(o,['player_count','PlayerCount','players','Players','current_players','CurrentPlayers'],null);const max=first(o,['max_players','MaxPlayers','slots','Slots'],null);if(typeof players==='number'){$('#statPlayers').textContent=max&&typeof max==='number'?`${players}/${max}`:String(players)}
