@@ -1,0 +1,29 @@
+#logs .tk-card-detail{padding:0!important;overflow:hidden}
+#logs .tk-card-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;cursor:pointer;list-style:none;user-select:none}
+#logs .tk-card-summary::-webkit-details-marker{display:none}
+#logs .tk-card-summary:hover{background:#151b17}
+#logs .tk-card-player{display:grid;gap:2px;min-width:0}
+#logs .tk-card-summary-right{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-width:0}
+#logs .tk-card-latest{font-size:.67rem;color:#7f8a80;white-space:nowrap}
+#logs .tk-card-chevron{font-size:1.05rem;color:#aeb7ad;transition:transform .15s ease;line-height:1}
+#logs .tk-card-detail[open] .tk-card-chevron{transform:rotate(180deg)}
+#logs .tk-card-detail[open]{border-color:rgba(221,88,80,.56);background:#111713}
+#logs .tk-card-body{padding:0 12px 12px;border-top:1px solid rgba(203,75,69,.2)}
+#logs .tk-event-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:8px;margin-top:10px}
+#logs .tk-event-card{padding:10px;border:1px solid #303a32;border-radius:9px;background:#0d120f;min-width:0}
+#logs .tk-event-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+#logs .tk-event-top span{font-size:.78rem;color:#c3cbc3;overflow-wrap:anywhere}
+#logs .tk-event-top strong{color:#f1f3ef}
+#logs .tk-event-top time{font-size:.66rem;color:#79837a;white-space:nowrap}
+#logs .tk-event-weapon{margin-top:6px;font-size:.75rem;font-weight:800;color:#d9b95f;overflow-wrap:anywhere}
+#logs .tk-event-id{margin-top:4px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.64rem;color:#747f75;word-break:break-all}
+#logs .tk-event-raw{margin-top:7px;font-size:.68rem;color:#879188}
+#logs .tk-event-raw summary{cursor:pointer;color:#a5afa6}
+#logs .tk-event-raw code{display:block;margin-top:6px;padding:8px;border-radius:7px;background:#090d0a;white-space:pre-wrap;word-break:break-word;color:#9aa49b}
+#logs .cmdtk-permaban-note{margin:0 0 10px;padding:8px 10px;border:1px solid #394139;border-radius:8px;background:#0d120f;font-size:.74rem}
+@media(max-width:760px){
+  #logs .tk-card-summary{align-items:flex-start}
+  #logs .tk-card-summary-right{flex-wrap:wrap;justify-content:flex-end}
+  #logs .tk-card-latest{display:none}
+  #logs .tk-event-grid{grid-template-columns:1fr}
+}
