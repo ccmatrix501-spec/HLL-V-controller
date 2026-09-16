@@ -1,5 +1,6 @@
 (() => {
-  const POLICY_TEXT = '5-9 ability teamkills = warning. 10+ = 3-hour temporary ban. Below 5, the existing kick rule still applies when a strike gets fewer than 2 enemy kills or teamkills exceed enemy kills.';
+  const POLICY_VERSION = '2026-09-16-v2';
+  const POLICY_TEXT = '0-4 ability teamkills = warning of a kick. 5-9 = warning + kick, with a warning that 10+ will receive a 3-hour temporary ban. 10+ = 3-hour temporary ban.';
 
   function toast(message, type) {
     if (typeof window.toast === 'function') window.toast(message, type);
@@ -30,9 +31,66 @@
       .map((node) => String(node.textContent || ''))
       .find((text) => text.toLowerCase().includes('result:')) || '';
     const match = resultLine.match(/(\d+)\s+enemy kill\(s\).*?(\d+)\s+teamkill\(s\)/i);
-    const enemyKills = match ? Number(match[1]) : 0;
-    const teamKills = match ? Number(match[2]) : 0;
-    return { id, name, ability, enemyKills, teamKills };
+    return {
+      id,
+      name,
+      ability,
+      enemyKills: match ? Number(match[1]) : 0,
+      teamKills: match ? Number(match[2]) : 0
+    };
+  }
+
+  function levelFor(teamKills) {
+    if (teamKills >= 10) return 'ban';
+    if (teamKills >= 5) return 'kick';
+    return 'warn';
+  }
+
+  function policyReason(incident) {
+    if (incident.teamKills >= 10) return `${incident.teamKills} ability teamkills — 3-hour temporary-ban threshold reached`;
+    if (incident.teamKills >= 5) return `${incident.teamKills} ability teamkills — kick threshold reached; 10+ will receive a 3-hour temporary ban`;
+    return `${incident.teamKills} ability teamkill${incident.teamKills === 1 ? '' : 's'} — warning issued; 5-9 results in a kick`;
+  }
+
+  function makeButton(className, text, disabled) {
+    return `<button type="button" class="btn ${className.includes('ban') || className.includes('kick') ? 'danger' : 'ghost'} small ${className}" ${disabled ? 'disabled' : ''}>${text}</button>`;
+  }
+
+  function rewriteCard(card) {
+    const incident = incidentFromCard(card);
+    if (card.dataset.commanderPolicy === POLICY_VERSION && Number(card.dataset.teamKills) === incident.teamKills) return;
+
+    const level = levelFor(incident.teamKills);
+    card.dataset.commanderPolicy = POLICY_VERSION;
+    card.dataset.teamKills = String(incident.teamKills);
+    card.classList.remove('ok', 'warn', 'kick', 'ban');
+    card.classList.add(level);
+
+    const badge = card.querySelector('.cmdtk-badge');
+    if (badge) {
+      badge.classList.remove('ok', 'warn', 'kick', 'ban');
+      badge.classList.add(level);
+      badge.textContent = level === 'ban' ? '3H TEMP BAN' : level === 'kick' ? 'KICK + WARNING' : 'WARNING';
+    }
+
+    const lines = [...card.querySelectorAll('.cmdtk-line')];
+    let policyLine = lines.find((line) => String(line.textContent || '').toLowerCase().includes('policy:'));
+    if (policyLine) policyLine.innerHTML = `<span class="cmdtk-label">Policy:</span> ${policyReason(incident)}`;
+
+    let actions = card.querySelector('.cmdtk-actions');
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.className = 'cmdtk-actions';
+      card.appendChild(actions);
+    }
+    const disabled = !incident.id;
+    if (level === 'ban') {
+      actions.innerHTML = makeButton('cmdtk-policy-ban', '3-Hour Temp Ban', disabled);
+    } else if (level === 'kick') {
+      actions.innerHTML = makeButton('cmdtk-policy-kick', 'Warn & Kick', disabled);
+    } else {
+      actions.innerHTML = makeButton('cmdtk-policy-warn', 'Send Warning', disabled);
+    }
   }
 
   function rewritePolicyUi() {
@@ -40,47 +98,26 @@
     if (!panel) return;
 
     const policy = panel.querySelector('.cmdtk-head .muted');
-    if (policy && policy.textContent !== POLICY_TEXT) policy.textContent = POLICY_TEXT;
+    if (policy) policy.textContent = POLICY_TEXT;
 
+    const cards = [...panel.querySelectorAll('.cmdtk-card')];
+    cards.forEach(rewriteCard);
+
+    const counts = { warn: 0, kick: 0, ban: 0 };
+    cards.forEach((card) => {
+      const level = levelFor(incidentFromCard(card).teamKills);
+      counts[level] += 1;
+    });
     const summary = panel.querySelector('#commanderTkSummary');
     if (summary) {
-      const next = String(summary.textContent || '')
-        .replace(/permanent-ban case\(s\)/gi, '3-hour temp-ban case(s)')
-        .replace(/permanent ban/gi, '3-hour temporary ban');
-      if (next !== summary.textContent) summary.textContent = next;
+      summary.textContent = `${cards.length} commander incident(s) with friendly kills • ${counts.warn} warning case(s) • ${counts.kick} warn-and-kick case(s) • ${counts.ban} three-hour temp-ban case(s).`;
     }
-
-    panel.querySelectorAll('.cmdtk-card').forEach((card) => {
-      const badge = card.querySelector('.cmdtk-badge.ban');
-      if (badge && badge.textContent !== '3H TEMP BAN') badge.textContent = '3H TEMP BAN';
-
-      const banButton = card.querySelector('.cmdtk-ban');
-      if (banButton && banButton.textContent !== '3-Hour Temp Ban') banButton.textContent = '3-Hour Temp Ban';
-
-      card.querySelectorAll('.cmdtk-line').forEach((line) => {
-        const current = String(line.textContent || '');
-        if (!/permanent-ban|permanent ban/i.test(current)) return;
-        const html = line.innerHTML
-          .replace(/10\+ ability teamkills — permanent-ban threshold reached/gi, '10+ ability teamkills — 3-hour temporary-ban threshold reached')
-          .replace(/permanent ban/gi, '3-hour temporary ban')
-          .replace(/permanent-ban/gi, '3-hour temporary-ban');
-        if (html !== line.innerHTML) line.innerHTML = html;
-      });
-    });
   }
 
-  async function sendCorrectedWarning(button) {
-    const card = button.closest('.cmdtk-card');
-    const incident = incidentFromCard(card);
-    if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot warn them automatically.');
-      return;
-    }
-
-    const message = `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkills.\nCommander abilities reaching 5 teamkills receive a warning.\n10 teamkills from an ability results in a 3-hour temporary ban.\n\nWatch friendly positions before using commander abilities.`;
-    if (!confirm(`Send a commander-ability warning to ${incident.name}?\n\n${incident.teamKills} teamkill(s)`)) return;
-
-    const oldText = button.textContent;
+  async function sendWarning(incident, button) {
+    const message = `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkill${incident.teamKills === 1 ? '' : 's'}.\n\nTHIS IS A WARNING.\n5-9 commander-ability teamkills results in a kick.\n10+ results in a 3-hour temporary ban.\n\nCheck friendly positions before using commander abilities.`;
+    if (!confirm(`Warn ${incident.name}?\n\n${incident.teamKills} commander-ability teamkill(s)`)) return;
+    const old = button.textContent;
     button.disabled = true;
     button.textContent = 'Sending...';
     try {
@@ -90,23 +127,33 @@
       toast(error.message || String(error), 'error');
     } finally {
       button.disabled = false;
-      button.textContent = oldText;
-      rewritePolicyUi();
+      button.textContent = old;
     }
   }
 
-  async function applyThreeHourBan(button) {
-    const card = button.closest('.cmdtk-card');
-    const incident = incidentFromCard(card);
-    if (!incident.id) {
-      alert('This log incident does not include a player ID, so the controller cannot ban them automatically.');
-      return;
+  async function warnAndKick(incident, button) {
+    const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills)`;
+    if (!confirm(`Warn and kick ${incident.name}?\n\n${incident.teamKills} ability teamkills is within the 5-9 kick range.`)) return;
+    const old = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Kicking...';
+    try {
+      const message = `[ 1ST M.I. COMMANDER WARNING ]\n\nYour ${incident.ability} caused ${incident.teamKills} teamkills.\nYou are being KICKED for commander-ability teamkilling.\n\n10+ commander-ability teamkills results in a 3-hour temporary ban.`;
+      await apiAction(`/api/v2/players/${encodeURIComponent(incident.id)}/message`, { message }).catch(() => {});
+      await apiAction('/api/v2/kick', { player_id: incident.id, reason });
+      toast(`${incident.name} warned and kicked`);
+    } catch (error) {
+      toast(error.message || String(error), 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = old;
     }
+  }
 
+  async function applyThreeHourBan(incident, button) {
     const reason = `Commander ability teamkilling: ${incident.ability} caused ${incident.teamKills} teamkills (${incident.enemyKills} enemy kills) — 3-hour temporary ban`;
-    if (!confirm(`Temporarily ban ${incident.name} for 3 hours?\n\n${incident.teamKills} commander-ability teamkills meets the 10+ temporary-ban threshold.\n\n${reason}`)) return;
-
-    const oldText = button.textContent;
+    if (!confirm(`Temporarily ban ${incident.name} for 3 hours?\n\n${incident.teamKills} commander-ability teamkills meets the 10+ temporary-ban threshold.`)) return;
+    const old = button.textContent;
     button.disabled = true;
     button.textContent = 'Banning...';
     try {
@@ -121,35 +168,35 @@
       toast(error.message || String(error), 'error');
     } finally {
       button.disabled = false;
-      button.textContent = oldText;
-      rewritePolicyUi();
+      button.textContent = old;
     }
   }
 
-  // Capture clicks before the older commander-review handlers run. This prevents
-  // the previous permanent-ban action from ever being called after this policy update.
   document.addEventListener('click', (event) => {
-    const banButton = event.target.closest?.('.cmdtk-ban');
-    if (banButton) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      applyThreeHourBan(banButton);
-      return;
-    }
-
-    const warnButton = event.target.closest?.('.cmdtk-warn');
-    if (warnButton) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      sendCorrectedWarning(warnButton);
-    }
+    const button = event.target.closest?.('.cmdtk-policy-warn, .cmdtk-policy-kick, .cmdtk-policy-ban');
+    if (!button) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const incident = incidentFromCard(button.closest('.cmdtk-card'));
+    if (!incident.id) return alert('This incident does not include a player ID.');
+    if (button.classList.contains('cmdtk-policy-ban')) applyThreeHourBan(incident, button);
+    else if (button.classList.contains('cmdtk-policy-kick')) warnAndKick(incident, button);
+    else sendWarning(incident, button);
   }, true);
 
   function installObserver() {
     rewritePolicyUi();
     const root = document.getElementById('logs') || document.body;
-    const observer = new MutationObserver(() => rewritePolicyUi());
-    observer.observe(root, { childList: true, subtree: true });
+    let pending = false;
+    const observer = new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        rewritePolicyUi();
+      });
+    });
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installObserver, { once: true });
