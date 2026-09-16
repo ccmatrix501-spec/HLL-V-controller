@@ -123,6 +123,18 @@ async function statsPayload() {
 }
 
 function installPublicStats(app) {
+  // These endpoints intentionally contain public, sanitised game statistics only.
+  // Allow the public website to read them directly so live polling does not need
+  // to pass through a Vercel server function.
+  app.use('/public/stats/hllv', (req, res, next) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Accept, Content-Type');
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    return next();
+  });
+
   app.get('/public/stats/hllv', statsLimiter, async (req, res) => {
     try {
       const requested = Number(req.query?.limit ?? MAX_PUBLIC_PLAYERS);
