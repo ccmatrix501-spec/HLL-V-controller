@@ -13,6 +13,20 @@
 #logs .admin-log-rows{display:flex;flex-direction:column;gap:9px;max-height:58vh;overflow:auto;padding-right:4px}
 #logs .admin-log-rows.loading{opacity:.72}
 
+/* Admin Logs subcategories */
+#logs .admin-log-subtabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:5px;border:1px solid #303a32;border-radius:12px;background:#0d110e}
+#logs .admin-log-subtab{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;padding:12px 14px;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb7ad;text-align:left;cursor:pointer;transition:.15s ease}
+#logs .admin-log-subtab:hover{background:#171d18;color:#f1f4ef;border-color:#303a32}
+#logs .admin-log-subtab.active{background:linear-gradient(180deg,#282d27,#202520);border-color:#4b554c;color:#f2d27c;box-shadow:inset 0 0 0 1px rgba(215,179,90,.08)}
+#logs .admin-log-subtab-title{font-weight:900;font-size:.9rem}
+#logs .admin-log-subtab-note{font-size:.7rem;color:#7f8a80;font-weight:600}
+#logs .admin-log-subtab.active .admin-log-subtab-note{color:#a9b3aa}
+#logs .admin-log-subpane{display:grid;gap:14px;min-width:0}
+#logs .admin-log-subpane[hidden]{display:none!important}
+#logs .admin-log-teamkill-pane{align-content:start}
+#logs .admin-log-teamkill-pane .tk-watch,#logs .admin-log-teamkill-pane .cmdtk-watch{margin:0}
+#logs .admin-log-teamkill-empty{padding:28px;text-align:center;color:#89958a;border:1px dashed #313a33;border-radius:10px;background:#101512}
+
 @media(max-width:1100px){
   #logs .admin-log-toolbar{grid-template-columns:1fr 200px}
   #logs .admin-log-auto{justify-self:start}
@@ -22,4 +36,5 @@
   #logs .admin-log-toolbar{grid-template-columns:1fr}
   #logs .admin-log-auto,#logs #adminLogCount{justify-self:start}
   #logs .admin-log-rows{max-height:none}
+  #logs .admin-log-subtabs{grid-template-columns:1fr}
 }
