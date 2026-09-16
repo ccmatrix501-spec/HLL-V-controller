@@ -1,0 +1,6 @@
+{
+  "version": "1.4.0",
+  "published": "2026-09-17T07:40:00+10:00",
+  "notes": "Live updater channel initialized. Future extractor changes can be pushed into the same active working copy, SHA-256 verified, backed up, applied, and restarted automatically.",
+  "files": []
+}
