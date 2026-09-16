@@ -8,7 +8,7 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,3 +28,28 @@ jobs:
           test -f public/app.js
           test -f public/admin-logs.js
           test -f public/teamkill-monitor.js
+      - name: Smoke test controller boot and health
+        env:
+          PANEL_PASSWORD: ci-controller-password
+          SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef
+          RCON_BACKEND: http://127.0.0.1:65535
+          COOKIE_SECURE: 'false'
+          PORT: '8090'
+        run: |
+          npm start >/tmp/hllv-controller.log 2>&1 &
+          pid=$!
+          cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; cat /tmp/hllv-controller.log; }
+          trap cleanup EXIT
+          ready=0
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8090/health >/tmp/health.json; then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+          test "$ready" -eq 1
+          grep -q '"ok":true' /tmp/health.json
+          curl --fail --silent --show-error http://127.0.0.1:8090/controller/status | grep -q '"deployment"'
+      - name: Build production Docker image
+        run: docker build --pull=false -t hllv-controller-ci .
