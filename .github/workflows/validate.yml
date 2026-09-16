@@ -21,6 +21,22 @@ jobs:
           node --check persistent-auth.js
           node --check public-stats-preload.js
           find public -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Verify every frontend asset referenced by index exists
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path('public/index.html').read_text(encoding='utf-8')
+          refs = re.findall(r'(?:src|href)="(/[^"?#]+\.(?:js|css))', html)
+          missing = [ref for ref in refs if not Path('public', ref.lstrip('/')).is_file()]
+          duplicates = sorted({ref for ref in refs if refs.count(ref) > 1})
+          if missing:
+              raise SystemExit(f'Missing referenced frontend assets: {missing}')
+          if duplicates:
+              raise SystemExit(f'Duplicate frontend asset references: {duplicates}')
+          print(f'Validated {len(refs)} referenced JS/CSS assets')
+          PY
       - name: Verify required controller assets
         run: |
           test -f public/index.html
@@ -28,7 +44,8 @@ jobs:
           test -f public/app.js
           test -f public/admin-logs.js
           test -f public/teamkill-monitor.js
-      - name: Smoke test controller boot and health
+          test ! -f controller-resilience-preload.js
+      - name: Smoke test controller boot, auth and degraded bridge handling
         env:
           PANEL_PASSWORD: ci-controller-password
           SESSION_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef
@@ -51,5 +68,17 @@ jobs:
           test "$ready" -eq 1
           grep -q '"ok":true' /tmp/health.json
           curl --fail --silent --show-error http://127.0.0.1:8090/controller/status | grep -q '"deployment"'
+          curl --fail --silent --show-error http://127.0.0.1:8090/ >/tmp/controller-index.html
+          grep -q 'controller-runtime.js' /tmp/controller-index.html
+          curl --fail --silent --show-error \
+            -c /tmp/controller-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"password":"ci-controller-password"}' \
+            http://127.0.0.1:8090/controller/login | grep -q '"ok":true'
+          status=$(curl --silent --output /tmp/diag.json --write-out '%{http_code}' \
+            -b /tmp/controller-cookies.txt \
+            http://127.0.0.1:8090/controller/diagnostics)
+          test "$status" -eq 502
+          grep -q '"bridge_reachable":false' /tmp/diag.json
       - name: Build production Docker image
         run: docker build --pull=false -t hllv-controller-ci .
