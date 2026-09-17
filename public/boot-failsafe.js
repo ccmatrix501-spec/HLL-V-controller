@@ -4,8 +4,32 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
+  const FEATURE_VERSION = '20260917-v5';
+  const FEATURE_SCRIPTS = Object.freeze([
+    '/controller-runtime.js',
+    '/app.js',
+    '/player-roster.js',
+    '/access-manager.js',
+    '/record-name-editor.js',
+    '/ban-player-search.js',
+    '/live-summary.js',
+    '/repeats.js',
+    '/map-manager.js',
+    '/saved-broadcasts.js',
+    '/map-names.js',
+    '/voting.js',
+    '/leaderboard.js',
+    '/match-leaderboard.js',
+    '/admin-logs.js',
+    '/teamkill-monitor.js',
+    '/commander-teamkill-review.js',
+    '/commander-tempban-policy.js'
+  ]);
+
   let coreBusy = false;
   let watchdog = null;
+  let featureLoadPromise = null;
+  const featureFailures = [];
 
   function byId(id) {
     return document.getElementById(id);
@@ -122,13 +146,16 @@
   }
 
   async function safeCoreBoot() {
-    if (coreBusy || document.documentElement.dataset.controllerAuthenticated !== '1') return;
+    if (coreBusy || document.documentElement.dataset.controllerAuthenticated !== '1') return false;
     coreBusy = true;
     try {
       const status = await xhrJson('GET', `/api/v2/connection/status?_=${Date.now()}`, null, CORE_TIMEOUT_MS);
       const connected = Boolean(status && status.connected);
       setConnection(connected);
-      if (!connected) return;
+      if (!connected) {
+        window.__HLLVSafeBootReady = true;
+        return true;
+      }
 
       const results = await Promise.allSettled([
         xhrJson('GET', `/api/v2/server?type=session&_=${Date.now()}`, null, CORE_TIMEOUT_MS),
@@ -137,20 +164,71 @@
       if (results[0].status === 'fulfilled') updateServer(results[0].value);
       if (results[1].status === 'fulfilled') updatePlayers(results[1].value);
       window.__HLLVSafeBootReady = true;
+      return true;
     } catch (err) {
       setConnection(false);
-      console.warn('[controller XHR core boot]', err);
+      console.warn('[controller core boot]', err);
+      return false;
     } finally {
       coreBusy = false;
     }
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[data-hllv-feature="${src}"]`);
+      if (existing) {
+        if (existing.dataset.loaded === '1') return resolve();
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = `${src}?v=${encodeURIComponent(FEATURE_VERSION)}`;
+      script.async = false;
+      script.dataset.hllvFeature = src;
+      script.onload = () => {
+        script.dataset.loaded = '1';
+        resolve();
+      };
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.body.appendChild(script);
+    });
+  }
+
+  function loadFeatureScripts() {
+    if (featureLoadPromise) return featureLoadPromise;
+    featureLoadPromise = (async () => {
+      document.documentElement.dataset.controllerFeatures = 'loading';
+      for (const src of FEATURE_SCRIPTS) {
+        try {
+          await loadScript(src);
+        } catch (err) {
+          featureFailures.push({ src, message: err?.message || String(err) });
+          console.error('[controller feature load]', src, err);
+        }
+      }
+      document.documentElement.dataset.controllerFeatures = featureFailures.length ? 'degraded' : 'ready';
+      window.__HLLVFeaturesLoaded = true;
+      window.__HLLVFeatureFailures = featureFailures.slice();
+      return featureFailures.length === 0;
+    })();
+    return featureLoadPromise;
+  }
+
+  async function enterAuthenticatedController() {
+    setView(true);
+    await safeCoreBoot();
+    void loadFeatureScripts();
   }
 
   async function syncStatus() {
     try {
       const status = await xhrJson('GET', `/controller/status?_=${Date.now()}`, null, STATUS_TIMEOUT_MS);
       const authenticated = Boolean(status && status.authenticated);
-      setView(authenticated);
-      if (authenticated) void safeCoreBoot();
+      if (authenticated) await enterAuthenticatedController();
+      else setView(false);
       return authenticated;
     } catch (err) {
       setView(false);
@@ -190,12 +268,9 @@
         passwordInput.value = '';
         const authenticated = await syncStatus();
         if (!authenticated) throw new Error('Login was accepted but the browser did not retain the controller session.');
-
-        // Reload once after a successful login so all normal controller feature
-        // scripts initialise with an authenticated session from the start.
-        window.location.replace(`/?logged_in=${Date.now()}`);
       } catch (err) {
         if (error) error.textContent = err && err.message ? err.message : 'Login failed.';
+      } finally {
         if (button) {
           button.disabled = false;
           button.textContent = 'Enter Controller';
@@ -224,13 +299,15 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '4.0.0-xhr-core',
-    retry() { return syncStatus().then(() => safeCoreBoot()); },
+    version: '5.0.0-deterministic',
+    retry() { return syncStatus(); },
     status() {
       return {
         authenticated: document.documentElement.dataset.controllerAuthenticated === '1',
         rconConnected: document.documentElement.dataset.rconConnected === '1',
-        coreReady: Boolean(window.__HLLVSafeBootReady)
+        coreReady: Boolean(window.__HLLVSafeBootReady),
+        features: document.documentElement.dataset.controllerFeatures || 'not-loaded',
+        featureFailures: featureFailures.slice()
       };
     }
   };
