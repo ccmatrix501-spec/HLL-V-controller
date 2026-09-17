@@ -13,6 +13,7 @@ export HLLV_RCON_RETRY_SECONDS="${HLLV_RCON_RETRY_SECONDS:-5}"
 export HLLV_RCON_CHECK_SECONDS="${HLLV_RCON_CHECK_SECONDS:-3}"
 export RCON_CONNECT_TIMEOUT="${RCON_CONNECT_TIMEOUT:-35}"
 export RCON_COMMAND_TIMEOUT="${RCON_COMMAND_TIMEOUT:-30}"
+export EMBEDDED_RCON_PORT="$BRIDGE_PORT"
 
 if [ -z "${HLLV_RCON_HOST:-}" ] || [ -z "${HLLV_RCON_PASSWORD:-}" ]; then
   echo "[DIRECT-RCON] Missing HLLV_RCON_HOST or HLLV_RCON_PASSWORD; controller will start, but direct RCON auto-connect cannot authenticate." >&2
@@ -20,7 +21,10 @@ fi
 
 echo "[DIRECT-RCON] Starting embedded HLL:V RCON service on 127.0.0.1:${BRIDGE_PORT}"
 cd "$BRIDGE_DIR"
-"$BRIDGE_PY" -m uvicorn admin_support_entry:app --host 127.0.0.1 --port "$BRIDGE_PORT" &
+# The current revive compatibility parser can mistake our own SERVER STATS messages
+# for revive-like events. Keep that diagnostic logger at ERROR so a busy server
+# cannot flood Railway's 500 logs/sec limit while the bridge remains functional.
+"$BRIDGE_PY" -c 'import logging, os, uvicorn; logging.getLogger("hllv-rcon-bridge.revives").setLevel(logging.ERROR); uvicorn.run("admin_support_entry:app", host="127.0.0.1", port=int(os.environ["EMBEDDED_RCON_PORT"]))' &
 BRIDGE_PID=$!
 
 cleanup() {
