@@ -58,13 +58,16 @@ jobs:
           cleanup() { kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; cat /tmp/hllv-controller.log; }
           trap cleanup EXIT
           ready=0
+          set +e
           for i in $(seq 1 30); do
-            if curl --fail --silent --show-error http://127.0.0.1:8090/health >/tmp/health.json; then
+            curl --fail --silent http://127.0.0.1:8090/health >/tmp/health.json 2>/dev/null
+            if [ "$?" -eq 0 ]; then
               ready=1
               break
             fi
             sleep 0.5
           done
+          set -e
           test "$ready" -eq 1
           grep -q '"ok":true' /tmp/health.json
           curl --fail --silent --show-error http://127.0.0.1:8090/controller/status | grep -q '"deployment"'
