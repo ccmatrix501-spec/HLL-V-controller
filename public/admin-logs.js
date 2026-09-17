@@ -1,6 +1,8 @@
 (() => {
   let entries = [];
   let loading = false;
+  let backendEntryCount = 0;
+  let hiddenAdminCameraCount = 0;
 
   const $ = (selector) => document.querySelector(selector);
 
@@ -273,15 +275,14 @@
     const observer = new MutationObserver(() => adoptTeamkillPanels());
     observer.observe(viewer, { childList: true, subtree: true });
 
-    let initial = 'normal';
-    try {
-      if (sessionStorage.getItem('hll-admin-log-subtab') === 'teamkill') initial = 'teamkill';
-    } catch {}
-    setSubtab(initial);
+    // Always enter the Logs page on the actual Admin Logs pane. Persisting the
+    // Teamkill subtab made successful log loads invisible after returning to this view.
+    setSubtab('normal');
 
     const nav = document.querySelector('[data-view="logs"]');
     nav?.addEventListener('click', () => {
       setTimeout(() => {
+        setSubtab('normal');
         adoptTeamkillPanels();
         load();
       }, 0);
@@ -294,6 +295,9 @@
       const logsView = $('#logs');
       if ($('#adminLogAuto')?.checked && logsView?.classList.contains('active')) load();
     }, 5000);
+
+    // Covers page restoration/direct activation where there was no fresh nav click.
+    if ($('#logs')?.classList.contains('active')) setTimeout(load, 0);
   }
 
   async function load() {
@@ -312,7 +316,10 @@
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
       if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
-      entries = (Array.isArray(data?.entries) ? data.entries : []).filter(entry => !isAdminCameraEvent(entry));
+      const backendEntries = Array.isArray(data?.entries) ? data.entries.filter(Boolean) : [];
+      backendEntryCount = Number.isFinite(Number(data?.count)) ? Number(data.count) : backendEntries.length;
+      hiddenAdminCameraCount = backendEntries.filter(isAdminCameraEvent).length;
+      entries = backendEntries.filter(entry => !isAdminCameraEvent(entry));
       entries.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
       render();
       adoptTeamkillPanels();
@@ -347,9 +354,12 @@
     }
 
     rows.classList.remove('teamkill-group-mode');
-    $('#adminLogCount').textContent = `${filtered.length} / ${entries.length} events`;
+    const hiddenNote = hiddenAdminCameraCount ? ` • ${hiddenAdminCameraCount} admin-camera hidden` : '';
+    $('#adminLogCount').textContent = `${filtered.length} shown • ${backendEntryCount} from RCON${hiddenNote}`;
     if (!filtered.length) {
-      rows.innerHTML = '<div class="admin-log-empty">No matching admin log events.</div>';
+      rows.innerHTML = backendEntryCount > 0 && hiddenAdminCameraCount >= backendEntryCount
+        ? `<div class="admin-log-empty">RCON returned ${backendEntryCount} event${backendEntryCount === 1 ? '' : 's'}, but they are all Admin Camera events and are hidden.</div>`
+        : '<div class="admin-log-empty">No matching admin log events.</div>';
       return;
     }
 
