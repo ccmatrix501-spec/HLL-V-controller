@@ -72,7 +72,9 @@ jobs:
           grep -q '"ok":true' /tmp/health.json
           curl --fail --silent --show-error http://127.0.0.1:8090/controller/status | grep -q '"deployment"'
           curl --fail --silent --show-error http://127.0.0.1:8090/ >/tmp/controller-index.html
-          grep -q 'controller-runtime.js' /tmp/controller-index.html
+          grep -q 'boot-failsafe.js' /tmp/controller-index.html
+          grep -q "'/controller-runtime.js'" public/boot-failsafe.js
+          grep -q "'/admin-logs.js'" public/boot-failsafe.js
           curl --fail --silent --show-error \
             -c /tmp/controller-cookies.txt \
             -H 'Content-Type: application/json' \
