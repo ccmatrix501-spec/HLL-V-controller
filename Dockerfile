@@ -8,6 +8,7 @@ RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY persistent-auth.js ./
 COPY public-stats-preload.js ./
+COPY backend-watchdog.js ./
 COPY server.js ./
 COPY public ./public
 
