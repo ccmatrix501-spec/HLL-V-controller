@@ -12,8 +12,8 @@ const { rateLimit } = require('express-rate-limit');
 
 const IS_RAILWAY = Boolean(process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_ENVIRONMENT_ID);
 const RCON_BACKEND = process.env.RCON_BACKEND || (IS_RAILWAY
-  ? 'http://hllv-rcon.railway.internal:8080'
-  : 'http://hllv-rcon:8080');
+  ? 'http://rcon.railway.internal:8080'
+  : 'http://rcon:8080');
 const CACHE_MS = Math.max(5_000, Number(process.env.PUBLIC_STATS_CACHE_MS || 15_000));
 const MAX_PUBLIC_PLAYERS = 10000;
 
