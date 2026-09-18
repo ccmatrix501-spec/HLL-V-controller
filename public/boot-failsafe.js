@@ -4,27 +4,26 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260919-v10-lazy-features';
+  const FEATURE_VERSION = '20260919-v11-deep-freeze-fix';
   // Mobile stability: only load the core controller at startup. Heavy feature
   // modules are lazy-loaded when their view is actually opened.
+  // Keep startup extremely small on mobile. View-specific modules are loaded
+  // only when the administrator opens that view.
   const FEATURE_SCRIPTS = Object.freeze([
     '/controller-runtime.js',
     '/app.js',
-    '/player-roster.js',
-    '/access-manager.js',
-    '/record-name-editor.js',
-    '/ban-player-search.js',
     '/live-summary.js',
     '/repeats.js',
-    '/map-manager.js',
-    '/saved-broadcasts.js',
-    '/map-names.js'
+    '/saved-broadcasts.js'
   ]);
   const LAZY_FEATURES = Object.freeze({
-    voting: ['/voting.js'],
-    leaderboard: ['/leaderboard.js', '/match-leaderboard.js'],
+    players: ['/player-roster.js'],
+    maps: ['/map-manager.js', '/map-names.js'],
+    access: ['/access-manager.js', '/record-name-editor.js'],
+    bans: ['/record-name-editor.js', '/ban-player-search.js'],
     logs: ['/admin-logs.js', '/teamkill-monitor.js', '/commander-teamkill-review.js', '/commander-tempban-policy.js']
   });
+  const IDLE_FEATURES = Object.freeze(['/voting.js', '/leaderboard.js', '/match-leaderboard.js']);
 
   let coreBusy = false;
   let watchdog = null;
@@ -178,12 +177,9 @@
         return true;
       }
 
-      const results = await Promise.allSettled([
-        xhrJson('GET', `/api/v2/server?type=session&_=${Date.now()}`, null, CORE_TIMEOUT_MS),
-        xhrJson('GET', `/api/v2/players?_=${Date.now()}`, null, CORE_TIMEOUT_MS)
-      ]);
-      if (results[0].status === 'fulfilled') updateServer(results[0].value);
-      if (results[1].status === 'fulfilled') updatePlayers(results[1].value);
+      // app.js owns live data refreshes. The failsafe only verifies connectivity;
+      // duplicating server/player requests here bypassed the shared fetch
+      // coordinator and was a major source of overlapping RCON traffic.
       window.__HLLVSafeBootReady = true;
       return true;
     } catch (err) {
@@ -254,6 +250,14 @@
       document.documentElement.dataset.controllerFeatures = featureFailures.length ? 'degraded' : 'ready';
       window.__HLLVFeaturesLoaded = true;
       window.__HLLVFeatureFailures = featureFailures.slice();
+      const idleLoad = () => {
+        for (const src of IDLE_FEATURES) loadScript(src).catch(err => {
+          featureFailures.push({ src, message: err?.message || String(err) });
+          console.error('[controller idle feature load]', src, err);
+        });
+      };
+      if ('requestIdleCallback' in window) requestIdleCallback(idleLoad, { timeout: 8000 });
+      else setTimeout(idleLoad, 6000);
       return featureFailures.length === 0;
     })();
     return featureLoadPromise;
@@ -326,22 +330,28 @@
     void syncStatus();
     clearInterval(watchdog);
     watchdog = setInterval(() => {
-      if (document.visibilityState === 'visible' && document.documentElement.dataset.controllerAuthenticated === '1') {
+      // app.js owns normal polling after it loads. Only invoke the failsafe if
+      // the feature loader is degraded or the app never became ready.
+      if (document.visibilityState === 'visible' &&
+          document.documentElement.dataset.controllerAuthenticated === '1' &&
+          (!window.__HLLVFeaturesLoaded || document.documentElement.dataset.controllerFeatures === 'degraded')) {
         void safeCoreBoot();
       }
-    }, 30000);
+    }, 60000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
 
-  window.addEventListener('pageshow', () => {
+  window.addEventListener('pageshow', event => {
     installLogin();
-    void syncStatus();
+    // DOMContentLoaded already performs the initial status check. Re-check only
+    // when restoring a page from the back/forward cache.
+    if (event.persisted) void syncStatus();
   });
 
   window.__HLLVSafeBoot = {
-    version: '10.0.0-lazy-features',
+    version: '11.0.0-deep-freeze-fix',
     retry() { return syncStatus(); },
     status() {
       return {
