@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260918-v6';
+  const FEATURE_VERSION = '20260918-v7-mobile-stability';
   const FEATURE_SCRIPTS = Object.freeze([
     '/controller-runtime.js',
     '/app.js',
@@ -299,7 +299,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '6.0.0-deterministic',
+    version: '7.0.0-mobile-stability',
     retry() { return syncStatus(); },
     status() {
       return {
