@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260918-v7-mobile-stability';
+  const FEATURE_VERSION = '20260918-v8-session-cards';
   const FEATURE_SCRIPTS = Object.freeze([
     '/controller-runtime.js',
     '/app.js',
@@ -132,9 +132,30 @@
     const statMap = byId('statMap');
     const statNextMap = byId('statNextMap');
     const statTime = byId('statTime');
-    if (statMap) statMap.textContent = String(first(obj, ['map','Map','map_name','MapName','current_map','CurrentMap']));
-    if (statNextMap) statNextMap.textContent = String(first(obj, ['next_map','NextMap','nextMap','MapNext']));
-    if (statTime) statTime.textContent = String(first(obj, ['remaining_time','RemainingTime','time_remaining','TimeRemaining','remaining','remaining_match_time']));
+    const statPlayers = byId('statPlayers');
+    const statPlayerSub = byId('statPlayerSub');
+
+    if (statMap) statMap.textContent = String(first(obj, [
+      'map','Map','map_name','mapName','MapName','map_id','mapId','current_map','currentMap','CurrentMap'
+    ]));
+    if (statNextMap) statNextMap.textContent = String(first(obj, [
+      'next_map','nextMap','NextMap','next_map_name','nextMapName','next_map_id','nextMapId','MapNext'
+    ]));
+    if (statTime) statTime.textContent = String(first(obj, [
+      'remaining_time','remainingTime','RemainingTime','remaining_match_time','remainingMatchTime',
+      'time_remaining','timeRemaining','TimeRemaining','remaining'
+    ]));
+
+    const playerValue = first(obj, ['player_count','playerCount','current_players','currentPlayers','PlayerCount','CurrentPlayers'], null);
+    const maxValue = first(obj, ['max_player_count','maxPlayerCount','max_players','maxPlayers','MaxPlayers'], null);
+    const playerNumber = Number(playerValue);
+    const maxNumber = Number(maxValue);
+    if (statPlayers && playerValue !== null && Number.isFinite(playerNumber)) {
+      statPlayers.textContent = maxValue !== null && Number.isFinite(maxNumber)
+        ? `${playerNumber}/${maxNumber}`
+        : String(playerNumber);
+      if (statPlayerSub) statPlayerSub.textContent = 'live server population';
+    }
   }
 
   function updatePlayers(data) {
@@ -299,7 +320,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '7.0.0-mobile-stability',
+    version: '8.0.0-session-cards',
     retry() { return syncStatus(); },
     status() {
       return {
