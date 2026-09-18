@@ -6,7 +6,22 @@
   const nativeFetch = window.fetch.bind(window);
   const inflight = new Map();
   const cache = new Map();
-  const API_TTL_MS = 1250;
+  const API_TTL_MS = 2000;
+  const ENDPOINT_TTL = [
+    [/\/api\/v2\/connection\/status/, 5000],
+    [/\/api\/v2\/server(?:\?|$)/, 3000],
+    [/\/api\/v2\/players(?:\?|$)/, 3000],
+    [/\/api\/v2\/map-(?:rotation|sequence)/, 10000],
+    [/\/api\/v2\/maps(?:\?|$)/, 30000],
+    [/\/api\/v2\/(?:vips|admins|bans)/, 10000],
+    [/\/api\/v2\/logs/, 5000],
+    [/\/api\/v2\/leaderboard/, 10000]
+  ];
+
+  function ttlFor(key) {
+    for (const [pattern, ttl] of ENDPOINT_TTL) if (pattern.test(key)) return ttl;
+    return API_TTL_MS;
+  }
 
   function isShareable(input, init) {
     const method = String(init?.method || 'GET').toUpperCase();
@@ -24,7 +39,7 @@
     const key = keyFor(input);
     const now = Date.now();
     const hit = cache.get(key);
-    if (hit && now - hit.at < API_TTL_MS) return Promise.resolve(hit.response.clone());
+    if (hit && now - hit.at < ttlFor(key)) return Promise.resolve(hit.response.clone());
 
     const active = inflight.get(key);
     if (active) return active.then(response => response.clone());
@@ -41,6 +56,7 @@
     version: 'coordinated-fetch-2',
     nativeFetch: false,
     apiTtlMs: API_TTL_MS,
+    endpointTtl: true,
     installedAt: Date.now()
   });
 })();
