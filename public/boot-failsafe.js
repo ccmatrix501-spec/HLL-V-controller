@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260918-v8-session-cards';
+  const FEATURE_VERSION = '20260919-v9-freeze-fix';
   const FEATURE_SCRIPTS = Object.freeze([
     '/controller-runtime.js',
     '/app.js',
@@ -308,7 +308,7 @@
       if (document.visibilityState === 'visible' && document.documentElement.dataset.controllerAuthenticated === '1') {
         void safeCoreBoot();
       }
-    }, 15000);
+    }, 30000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
@@ -320,7 +320,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '8.0.0-session-cards',
+    version: '9.0.0-freeze-fix',
     retry() { return syncStatus(); },
     status() {
       return {
