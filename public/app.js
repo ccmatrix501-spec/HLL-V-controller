@@ -191,5 +191,33 @@ async function loadLogs(){if(!state.connected)return;try{$('#logsBox').textConte
 function refreshView(v){if(v==='dashboard')loadServer();if(v==='players')loadPlayers();if(v==='maps'){loadMaps();loadRotation()}if(v==='access')loadAccess();if(v==='bans')loadBans();if(v==='logs')loadLogs()}
 $$('[data-refresh]').forEach(b=>b.onclick=()=>refreshView(b.dataset.refresh==='server'?'dashboard':b.dataset.refresh))
 
-setInterval(()=>{if(state.authenticated&&state.connected){loadServer();loadPlayers()}},10000)
-boot();
+let corePollBusy=false;
+
+async function pollActiveView(){
+  if(corePollBusy||document.hidden||!state.authenticated||!state.connected)return;
+  corePollBusy=true;
+  try{
+    if($('#dashboard')?.classList.contains('active')){
+      await Promise.allSettled([loadServer(),loadPlayers()]);
+    }else if($('#players')?.classList.contains('active')){
+      await loadPlayers();
+    }
+  }finally{
+    corePollBusy=false;
+  }
+}
+
+setInterval(()=>{void pollActiveView()},15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void pollActiveView()});
+
+// boot-failsafe.js already authenticated the session and completed the initial
+// RCON/server/player boot before loading this feature bundle. Reusing that state
+// avoids a second simultaneous controller boot on mobile browsers.
+if(document.documentElement.dataset.controllerAuthenticated==='1'){
+  state.authenticated=true;
+  state.connected=document.documentElement.dataset.rconConnected==='1';
+  showApp();
+  updateConnection(state.connected);
+}else{
+  boot();
+}
