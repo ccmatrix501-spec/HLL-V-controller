@@ -4,7 +4,9 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260919-v9-freeze-fix';
+  const FEATURE_VERSION = '20260919-v10-lazy-features';
+  // Mobile stability: only load the core controller at startup. Heavy feature
+  // modules are lazy-loaded when their view is actually opened.
   const FEATURE_SCRIPTS = Object.freeze([
     '/controller-runtime.js',
     '/app.js',
@@ -16,15 +18,13 @@
     '/repeats.js',
     '/map-manager.js',
     '/saved-broadcasts.js',
-    '/map-names.js',
-    '/voting.js',
-    '/leaderboard.js',
-    '/match-leaderboard.js',
-    '/admin-logs.js',
-    '/teamkill-monitor.js',
-    '/commander-teamkill-review.js',
-    '/commander-tempban-policy.js'
+    '/map-names.js'
   ]);
+  const LAZY_FEATURES = Object.freeze({
+    voting: ['/voting.js'],
+    leaderboard: ['/leaderboard.js', '/match-leaderboard.js'],
+    logs: ['/admin-logs.js', '/teamkill-monitor.js', '/commander-teamkill-review.js', '/commander-tempban-policy.js']
+  });
 
   let coreBusy = false;
   let watchdog = null;
@@ -218,6 +218,27 @@
     });
   }
 
+  const lazyLoaded = new Set();
+
+  async function loadLazyView(view) {
+    const scripts = LAZY_FEATURES[view];
+    if (!scripts || lazyLoaded.has(view)) return;
+    lazyLoaded.add(view);
+    for (const src of scripts) {
+      try { await loadScript(src); }
+      catch (err) {
+        featureFailures.push({ src, message: err?.message || String(err) });
+        console.error('[controller lazy feature load]', src, err);
+      }
+    }
+  }
+
+  document.addEventListener('click', event => {
+    const nav = event.target?.closest?.('[data-view]');
+    const view = nav?.dataset?.view;
+    if (view && LAZY_FEATURES[view]) setTimeout(() => void loadLazyView(view), 0);
+  }, true);
+
   function loadFeatureScripts() {
     if (featureLoadPromise) return featureLoadPromise;
     featureLoadPromise = (async () => {
@@ -320,7 +341,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '9.0.0-freeze-fix',
+    version: '10.0.0-lazy-features',
     retry() { return syncStatus(); },
     status() {
       return {
