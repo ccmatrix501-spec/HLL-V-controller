@@ -1,6 +1,9 @@
 'use strict';
 
-const BACKEND = String(process.env.RCON_BACKEND || '').replace(/\/$/, '');
+const IS_RAILWAY = Boolean(process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_ENVIRONMENT_ID);
+const BACKEND = String(process.env.RCON_BACKEND || (IS_RAILWAY
+  ? 'http://rcon.railway.internal:8080'
+  : 'http://rcon:8080')).replace(/\/$/, '');
 const CHECK_MS = Math.max(5000, Number(process.env.RCON_WATCHDOG_INTERVAL_MS || 15000));
 const TIMEOUT_MS = Math.max(2000, Number(process.env.RCON_WATCHDOG_TIMEOUT_MS || 8000));
 
