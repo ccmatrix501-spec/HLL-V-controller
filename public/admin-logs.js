@@ -332,7 +332,7 @@
     setInterval(() => {
       const logsView = $('#logs');
       if ($('#adminLogAuto')?.checked && logsView?.classList.contains('active')) load();
-    }, 5000);
+    }, 10000);
 
     // Covers page restoration/direct activation where there was no fresh nav click.
     if ($('#logs')?.classList.contains('active')) setTimeout(load, 0);
