@@ -3,6 +3,7 @@
   let loading = false;
   let backendEntryCount = 0;
   let hiddenAdminCameraCount = 0;
+  let enhancedReady = false;
 
   const $ = (selector) => document.querySelector(selector);
 
@@ -45,6 +46,39 @@
 
   function isTeamkill(entry) {
     return String(entry?.type || '').toUpperCase() === 'TEAM KILL';
+  }
+
+  function backendEntriesFrom(data) {
+    if (Array.isArray(data)) return data.filter(Boolean);
+    if (!data || typeof data !== 'object') return [];
+    for (const key of ['entries', 'logs', 'items', 'data', 'result', 'results']) {
+      if (Array.isArray(data[key])) return data[key].filter(Boolean);
+    }
+    return [];
+  }
+
+  function rawFallback() {
+    return $('#logsBox');
+  }
+
+  function showRawFallback(message = '') {
+    const raw = rawFallback();
+    if (!raw) return;
+    raw.style.display = '';
+    raw.removeAttribute('aria-hidden');
+    raw.dataset.adminLogsFallback = 'visible';
+    const current = String(raw.textContent || '').trim();
+    if (message && (!current || current === '—' || current === 'Loading Admin Logs…')) {
+      raw.textContent = message;
+    }
+  }
+
+  function hideRawFallback() {
+    const raw = rawFallback();
+    if (!raw) return;
+    raw.style.display = 'none';
+    raw.setAttribute('aria-hidden', 'true');
+    raw.dataset.adminLogsFallback = 'hidden';
   }
 
   function summary(entry) {
@@ -215,7 +249,11 @@
     const raw = $('#logsBox');
     if (!raw || $('#adminLogsViewer')) return;
 
-    raw.style.display = 'none';
+    // Keep the core app's raw JSON log box visible until this enhanced viewer
+    // has completed at least one successful RCON render. If this feature script
+    // ever errors or receives an unexpected payload, staff still see the live
+    // RCON response instead of a blank Logs page.
+    showRawFallback('Loading Admin Logs…');
 
     const viewer = document.createElement('div');
     viewer.id = 'adminLogsViewer';
@@ -316,16 +354,39 @@
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = null; }
       if (!response.ok) throw new Error(data?.error || data?.detail || text || `${response.status} ${response.statusText}`);
-      const backendEntries = Array.isArray(data?.entries) ? data.entries.filter(Boolean) : [];
+      const backendEntries = backendEntriesFrom(data);
       backendEntryCount = Number.isFinite(Number(data?.count)) ? Number(data.count) : backendEntries.length;
       hiddenAdminCameraCount = backendEntries.filter(isAdminCameraEvent).length;
       entries = backendEntries.filter(entry => !isAdminCameraEvent(entry));
       entries.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
       render();
       adoptTeamkillPanels();
+
+      // Only retire the raw fallback after the enhanced view has successfully
+      // consumed and rendered the backend payload.
+      enhancedReady = true;
+      hideRawFallback();
+      document.documentElement.dataset.adminLogsViewer = 'ready';
+      window.__HLLVAdminLogs = {
+        ready: true,
+        backendEntryCount,
+        visibleEntryCount: entries.length,
+        hiddenAdminCameraCount,
+        loadedAt: Date.now()
+      };
     } catch (error) {
-      rows.innerHTML = `<div class="admin-log-empty error">${esc(error.message || error)}</div>`;
-      $('#adminLogCount').textContent = '';
+      enhancedReady = false;
+      document.documentElement.dataset.adminLogsViewer = 'fallback';
+      const message = error?.message || String(error);
+      rows.innerHTML = `<div class="admin-log-empty error">${esc(message)}</div>`;
+      $('#adminLogCount').textContent = 'Enhanced viewer unavailable — raw RCON logs shown below';
+      showRawFallback(`Admin Logs viewer error: ${message}`);
+      window.__HLLVAdminLogs = {
+        ready: false,
+        error: message,
+        backendEntryCount,
+        loadedAt: Date.now()
+      };
     } finally {
       rows.classList.remove('loading');
       loading = false;
@@ -359,7 +420,9 @@
     if (!filtered.length) {
       rows.innerHTML = backendEntryCount > 0 && hiddenAdminCameraCount >= backendEntryCount
         ? `<div class="admin-log-empty">RCON returned ${backendEntryCount} event${backendEntryCount === 1 ? '' : 's'}, but they are all Admin Camera events and are hidden.</div>`
-        : '<div class="admin-log-empty">No matching admin log events.</div>';
+        : backendEntryCount > 0
+          ? `<div class="admin-log-empty">RCON returned ${backendEntryCount} event${backendEntryCount === 1 ? '' : 's'}, but none match the current search/filter.</div>`
+          : '<div class="admin-log-empty">RCON returned no events for this time range.</div>';
       return;
     }
 
