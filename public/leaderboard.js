@@ -272,7 +272,7 @@
     });
     setInterval(() => {
       if ($('#leaderboard')?.classList.contains('active')) load();
-    }, 15000);
+    }, 30000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
