@@ -207,8 +207,12 @@ async function pollActiveView(){
   }
 }
 
-setInterval(()=>{void pollActiveView()},15000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)void pollActiveView()});
+setInterval(()=>{void pollActiveView()},30000);
+let resumePollTimer=null;
+document.addEventListener('visibilitychange',()=>{
+  clearTimeout(resumePollTimer);
+  if(!document.hidden) resumePollTimer=setTimeout(()=>void pollActiveView(),750);
+});
 
 // boot-failsafe.js already authenticated the session and completed the initial
 // RCON/server/player boot before loading this feature bundle. Reusing that state
