@@ -12,8 +12,8 @@ const PORT = Number(process.env.PORT || 8090);
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const RCON_BACKEND = process.env.RCON_BACKEND || (IS_RAILWAY
-  ? 'http://hllv-rcon.railway.internal:8080'
-  : 'http://hllv-rcon:8080');
+  ? 'http://rcon.railway.internal:8080'
+  : 'http://rcon:8080');
 const QPANEL_URL = process.env.QPANEL_URL || 'https://qp.qonzer.com/';
 const TRUST_PROXY = process.env.TRUST_PROXY !== undefined
   ? process.env.TRUST_PROXY === 'true'
@@ -480,8 +480,8 @@ const rconProxy = createProxyMiddleware({
       res.end(JSON.stringify({
         error: `RCON backend unavailable: ${err.message}`,
         hint: IS_RAILWAY
-          ? 'Check RCON_BACKEND and confirm the hllv-rcon Railway service is online on port 8080.'
-          : 'Check that the hllv-rcon service is running.'
+          ? 'Check RCON_BACKEND and confirm the rcon Railway service is online on port 8080.'
+          : 'Check that the rcon service is running.'
       }));
     }
   }
