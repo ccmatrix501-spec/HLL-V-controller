@@ -97,7 +97,7 @@
       if (mapsActive || dashboardActive) patchAll();
     };
 
-    setInterval(patchWhenRelevant, 5000);
+    setInterval(() => { if (!document.hidden) patchWhenRelevant(); }, 15000);
     document.querySelector('[data-view="maps"]')?.addEventListener('click', () => setTimeout(patchAll, 100));
     document.querySelector('[data-view="dashboard"]')?.addEventListener('click', () => setTimeout(patchAll, 100));
     document.addEventListener('visibilitychange', () => {
