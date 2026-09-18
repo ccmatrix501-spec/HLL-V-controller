@@ -427,6 +427,12 @@
     }
   }
 
+  function commanderViewVisible() {
+    const logsView = $('#logs');
+    const pane = $('#adminLogTeamkillPane');
+    return !document.hidden && Boolean(logsView?.classList.contains('active') && pane && !pane.hidden);
+  }
+
   function install() {
     const existingMonitor = $('#teamkillWatch');
     const rows = $('#adminLogRows');
@@ -450,15 +456,26 @@
     if (existingMonitor) existingMonitor.insertAdjacentElement('afterend', panel);
     else rows.insertAdjacentElement('beforebegin', panel);
 
-    $('#commanderTkRefresh')?.addEventListener('click', load);
-    $('#logRange')?.addEventListener('change', load);
-    document.querySelector('[data-view="logs"]')?.addEventListener('click', () => setTimeout(load, 80));
-    load();
+    $('#commanderTkRefresh')?.addEventListener('click', () => { void load(); });
+    $('#logRange')?.addEventListener('change', () => {
+      if (commanderViewVisible()) void load();
+    });
+    document.querySelector('[data-view="logs"]')?.addEventListener('click', () => setTimeout(() => {
+      if (commanderViewVisible()) void load();
+    }, 80));
+    document.querySelector('.admin-log-subtab[data-admin-log-subtab="teamkill"]')
+      ?.addEventListener('click', () => setTimeout(() => {
+        if (commanderViewVisible()) void load();
+      }, 90));
+    if (commanderViewVisible()) void load();
+    document.addEventListener('visibilitychange', () => {
+      if (commanderViewVisible()) void load();
+    });
     return true;
   }
 
   async function load() {
-    if (loading || !$('#commanderTkWatch')) return;
+    if (loading || !$('#commanderTkWatch') || !commanderViewVisible()) return;
     loading = true;
     try {
       const selectedSeconds = Number($('#logRange')?.value || 3600);

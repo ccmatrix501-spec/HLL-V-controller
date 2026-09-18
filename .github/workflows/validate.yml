@@ -86,4 +86,5 @@ jobs:
           test "$status" -eq 502
           grep -q '"bridge_reachable":false' /tmp/diag.json
       - name: Build production Docker image
+        if: ${{ hashFiles('Dockerfile') != '' }}
         run: docker build --pull=false -t hllv-controller-ci .

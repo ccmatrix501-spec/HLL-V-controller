@@ -275,6 +275,12 @@
     }
   }
 
+  function teamkillViewVisible() {
+    const logsView = $('#logs');
+    const pane = $('#adminLogTeamkillPane');
+    return !document.hidden && Boolean(logsView?.classList.contains('active') && pane && !pane.hidden);
+  }
+
   function install() {
     const viewer = $('#adminLogsViewer');
     const rows = $('#adminLogRows');
@@ -310,22 +316,33 @@
 
     $('#tkMinimum')?.addEventListener('change', render);
     $('#tkIncludeCommander')?.addEventListener('change', render);
-    $('#tkRefresh')?.addEventListener('click', load);
-    $('#logRange')?.addEventListener('change', load);
+    $('#tkRefresh')?.addEventListener('click', () => { void load(); });
+    $('#logRange')?.addEventListener('change', () => {
+      if (teamkillViewVisible()) void load();
+    });
 
     const nav = document.querySelector('[data-view="logs"]');
-    nav?.addEventListener('click', () => setTimeout(load, 50));
+    nav?.addEventListener('click', () => setTimeout(() => {
+      if (teamkillViewVisible()) void load();
+    }, 50));
+    document.querySelector('.admin-log-subtab[data-admin-log-subtab="teamkill"]')
+      ?.addEventListener('click', () => setTimeout(() => {
+        if (teamkillViewVisible()) void load();
+      }, 60));
 
     const root = teamkillPane || viewer;
     const observer = new MutationObserver(() => applyPermanentBanGuard());
     observer.observe(root, { childList: true, subtree: true });
 
-    load();
+    if (teamkillViewVisible()) void load();
+    document.addEventListener('visibilitychange', () => {
+      if (teamkillViewVisible()) void load();
+    });
     return true;
   }
 
   async function load() {
-    if (loading || !$('#teamkillWatch')) return;
+    if (loading || !$('#teamkillWatch') || !teamkillViewVisible()) return;
     loading = true;
     try {
       const seconds = $('#logRange')?.value || '3600';

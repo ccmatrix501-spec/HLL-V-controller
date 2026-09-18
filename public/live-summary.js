@@ -1,5 +1,10 @@
 (() => {
-  const POLL_MS = 5000;
+  const POLL_MS = 30000;
+  let loading = false;
+
+  function dashboardVisible() {
+    return !document.hidden && document.querySelector('#dashboard')?.classList.contains('active');
+  }
 
   function pick(obj, keys, fallback = null) {
     if (!obj || typeof obj !== 'object') return fallback;
@@ -75,6 +80,8 @@
   }
 
   async function refreshLiveSummary() {
+    if (!dashboardVisible() || loading) return;
+    loading = true;
     try {
       const status = await getJson('/api/v2/connection/status');
       if (!status?.connected) return;
@@ -113,14 +120,20 @@
     } catch (err) {
       // Login screens, brief RCON transitions and map loads can temporarily fail.
       // Keep the last known values instead of flashing errors on the dashboard cards.
+    } finally {
+      loading = false;
     }
   }
 
   window.addEventListener('load', () => {
-    refreshLiveSummary();
-    setInterval(refreshLiveSummary, POLL_MS);
+    void refreshLiveSummary();
+    setInterval(() => { void refreshLiveSummary(); }, POLL_MS);
 
     const refreshButton = document.querySelector('[data-refresh="server"]');
-    if (refreshButton) refreshButton.addEventListener('click', () => setTimeout(refreshLiveSummary, 50));
+    if (refreshButton) refreshButton.addEventListener('click', () => setTimeout(() => { void refreshLiveSummary(); }, 50));
+    document.querySelector('[data-view="dashboard"]')?.addEventListener('click', () => setTimeout(() => { void refreshLiveSummary(); }, 100));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void refreshLiveSummary();
+    });
   });
 })();

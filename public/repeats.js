@@ -397,10 +397,22 @@
     }
   }
 
+  function repeatPanelVisible() {
+    return !document.hidden && document.querySelector('#dashboard')?.classList.contains('active');
+  }
+
   installBroadcastRepeat();
   installPlayerRepeat();
   installJobsPanel();
   installEditDialog();
-  loadRepeatJobs();
-  setInterval(loadRepeatJobs, 5000);
+  if (repeatPanelVisible()) void loadRepeatJobs();
+  setInterval(() => {
+    if (repeatPanelVisible()) void loadRepeatJobs();
+  }, 15000);
+  document.querySelector('[data-view="dashboard"]')?.addEventListener('click', () => {
+    setTimeout(() => { if (repeatPanelVisible()) void loadRepeatJobs(); }, 100);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (repeatPanelVisible()) void loadRepeatJobs();
+  });
 })();

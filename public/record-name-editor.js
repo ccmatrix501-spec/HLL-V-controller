@@ -2,6 +2,8 @@
   const $ = (selector) => document.querySelector(selector);
   const labels = {};
   const statsNames = {};
+  let lookupsLoaded = false;
+  let lookupPromise = null;
   const configs = [
     { boxId: 'vipBox', editorId: 'vipNameEditor', type: 'VIP', listKeys: ['vips', 'vipUsers', 'items'] },
     { boxId: 'adminBox', editorId: 'adminNameEditor', type: 'Admin', listKeys: ['adminUsers', 'admins', 'items'] },
@@ -78,20 +80,34 @@
   }
 
   async function loadLookups() {
-    const [labelResult, statsResult] = await Promise.allSettled([
-      api('/api/v2/player-labels'),
-      api('/api/v2/public-player-stats?limit=10000')
-    ]);
+    if (lookupsLoaded) return;
+    if (lookupPromise) return lookupPromise;
 
-    if (labelResult.status === 'fulfilled') {
-      Object.assign(labels, labelResult.value?.labels || {});
-    }
-    if (statsResult.status === 'fulfilled') {
-      for (const player of statsResult.value?.players || []) {
-        const id = String(player?.player_id || '').trim();
-        const name = String(player?.player_name || '').trim();
-        if (id && name) statsNames[id] = name;
+    lookupPromise = (async () => {
+      const [labelResult, statsResult] = await Promise.allSettled([
+        api('/api/v2/player-labels'),
+        // Name suggestions are only needed when Access/Bans is opened. Keep the
+        // payload bounded so a large stats database cannot exhaust a mobile tab.
+        api('/api/v2/public-player-stats?limit=2000')
+      ]);
+
+      if (labelResult.status === 'fulfilled') {
+        Object.assign(labels, labelResult.value?.labels || {});
       }
+      if (statsResult.status === 'fulfilled') {
+        for (const player of statsResult.value?.players || []) {
+          const id = String(player?.player_id || '').trim();
+          const name = String(player?.player_name || '').trim();
+          if (id && name) statsNames[id] = name;
+        }
+      }
+      lookupsLoaded = true;
+    })();
+
+    try {
+      await lookupPromise;
+    } finally {
+      lookupPromise = null;
     }
   }
 
@@ -258,14 +274,23 @@
     }
   }
 
-  async function install() {
+  function openRecordView() {
+    setTimeout(async () => {
+      await loadLookups().catch(() => {});
+      renderAll();
+    }, 150);
+  }
+
+  function install() {
     injectStyles();
-    await loadLookups().catch(() => {});
     renderAll();
     watchBoxes();
 
-    document.querySelector('[data-view="access"]')?.addEventListener('click', () => setTimeout(renderAll, 200));
-    document.querySelector('[data-view="bans"]')?.addEventListener('click', () => setTimeout(renderAll, 200));
+    // Do not download the stats-name lookup during controller boot. On phones it
+    // was one of the largest startup responses and was unnecessary unless an
+    // admin actually opened Access or Bans.
+    document.querySelector('[data-view="access"]')?.addEventListener('click', openRecordView);
+    document.querySelector('[data-view="bans"]')?.addEventListener('click', openRecordView);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });

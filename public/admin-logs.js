@@ -406,17 +406,26 @@
       return JSON.stringify(entry).toLowerCase().includes(query);
     });
 
+    const mobile = window.matchMedia?.('(max-width: 760px)')?.matches;
+    const maxRendered = mobile ? 160 : 600;
+
     if (type === 'TEAM KILL') {
-      const groups = groupTeamkills(filtered);
-      $('#adminLogCount').textContent = `${filtered.length} teamkill event${filtered.length === 1 ? '' : 's'} • ${groups.length} player${groups.length === 1 ? '' : 's'}`;
+      const visible = filtered.slice(0, maxRendered);
+      const groups = groupTeamkills(visible);
+      const capped = filtered.length > visible.length ? ` • newest ${visible.length} rendered` : '';
+      $('#adminLogCount').textContent = `${filtered.length} teamkill event${filtered.length === 1 ? '' : 's'} • ${groups.length} player${groups.length === 1 ? '' : 's'}${capped}`;
       rows.classList.add('teamkill-group-mode');
-      rows.innerHTML = renderTeamkillGroups(filtered);
+      rows.innerHTML = (filtered.length > visible.length
+        ? `<div class="admin-log-empty">Showing the newest ${visible.length} matching events to keep this device responsive. Narrow the time range or search to see older entries.</div>`
+        : '') + renderTeamkillGroups(visible);
       return;
     }
 
     rows.classList.remove('teamkill-group-mode');
     const hiddenNote = hiddenAdminCameraCount ? ` • ${hiddenAdminCameraCount} admin-camera hidden` : '';
-    $('#adminLogCount').textContent = `${filtered.length} shown • ${backendEntryCount} from RCON${hiddenNote}`;
+    const visible = filtered.slice(0, maxRendered);
+    const cappedNote = filtered.length > visible.length ? ` • newest ${visible.length} rendered` : '';
+    $('#adminLogCount').textContent = `${filtered.length} matching • ${backendEntryCount} from RCON${hiddenNote}${cappedNote}`;
     if (!filtered.length) {
       rows.innerHTML = backendEntryCount > 0 && hiddenAdminCameraCount >= backendEntryCount
         ? `<div class="admin-log-empty">RCON returned ${backendEntryCount} event${backendEntryCount === 1 ? '' : 's'}, but they are all Admin Camera events and are hidden.</div>`
@@ -426,7 +435,9 @@
       return;
     }
 
-    rows.innerHTML = filtered.map(renderEvent).join('');
+    rows.innerHTML = (filtered.length > visible.length
+      ? `<div class="admin-log-empty">Showing the newest ${visible.length} matching events to keep this device responsive. Narrow the time range or search to see older entries.</div>`
+      : '') + visible.map(renderEvent).join('');
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
