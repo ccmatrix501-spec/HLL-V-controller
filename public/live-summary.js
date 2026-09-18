@@ -1,5 +1,5 @@
 (() => {
-  const POLL_MS = 30000;
+  const POLL_MS = 60000;
   let loading = false;
 
   function dashboardVisible() {
@@ -129,15 +129,12 @@
     if (document.documentElement.dataset.liveSummaryInstalled === '1') return;
     document.documentElement.dataset.liveSummaryInstalled = '1';
 
-    void refreshLiveSummary();
     setInterval(() => { void refreshLiveSummary(); }, POLL_MS);
 
     const refreshButton = document.querySelector('[data-refresh="server"]');
     if (refreshButton) refreshButton.addEventListener('click', () => setTimeout(() => { void refreshLiveSummary(); }, 50));
     document.querySelector('[data-view="dashboard"]')?.addEventListener('click', () => setTimeout(() => { void refreshLiveSummary(); }, 100));
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) void refreshLiveSummary();
-    });
+
   }
 
   // Feature scripts are loaded dynamically after authentication. On a fast page
