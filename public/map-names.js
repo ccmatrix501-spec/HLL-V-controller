@@ -85,17 +85,24 @@
 
   function install() {
     patchAll();
-    let scheduled = false;
-    const observer = new MutationObserver(() => {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(() => {
-        scheduled = false;
-        patchAll();
-      });
+
+    // The old implementation watched every text/DOM mutation on the entire page.
+    // Live stats, timers and log rendering mutate constantly, which caused a
+    // feedback-heavy renderer workload on mobile Chrome. Map names only need a
+    // lightweight periodic pass while the relevant views are visible.
+    const patchWhenRelevant = () => {
+      if (document.hidden) return;
+      const mapsActive = document.querySelector('#maps')?.classList.contains('active');
+      const dashboardActive = document.querySelector('#dashboard')?.classList.contains('active');
+      if (mapsActive || dashboardActive) patchAll();
+    };
+
+    setInterval(patchWhenRelevant, 5000);
+    document.querySelector('[data-view="maps"]')?.addEventListener('click', () => setTimeout(patchAll, 100));
+    document.querySelector('[data-view="dashboard"]')?.addEventListener('click', () => setTimeout(patchAll, 100));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) patchWhenRelevant();
     });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    setInterval(patchSummary, 1500);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
