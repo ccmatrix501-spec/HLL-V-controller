@@ -56,7 +56,7 @@ function openQpanel(){window.open(state.qpanel,'_blank','noopener')};$('#qpanelB
 $$('.nav-item').forEach(btn=>btn.addEventListener('click',()=>{const v=btn.dataset.view;$$('.nav-item').forEach(x=>x.classList.toggle('active',x===btn));$$('.view').forEach(x=>x.classList.toggle('active',x.id===v));const titles={dashboard:'Server Dashboard',players:'Live Players',maps:'Map Control',access:'Admins & VIPs',bans:'Ban Management',settings:'Server Settings',logs:'Admin Logs'};$('#pageTitle').textContent=titles[v]||'Server Controller';if(state.connected)refreshView(v)}));
 
 function updateConnection(connected){state.connected=connected;const p=$('#connectionPill');p.className=`pill ${connected?'online':'offline'}`;p.textContent=connected?'RCON CONNECTED':'RCON DISCONNECTED';$('#connectBtn').textContent=connected?'Disconnect RCON':'Connect RCON';if(!connected){$('#statPlayerSub').textContent='No connection'}}
-async function checkRcon(){try{const s=await request('/api/v2/connection/status',{timeoutMs:RCON_STATUS_TIMEOUT_MS});updateConnection(Boolean(s.connected));if(s.connected){void refreshAllCore()}}catch(err){updateConnection(false);console.warn('RCON status check failed:',err.message)}}
+async function checkRcon(){try{const s=await request('/api/v2/connection/status',{timeoutMs:RCON_STATUS_TIMEOUT_MS});const wasConnected=state.connected;updateConnection(Boolean(s.connected));if(s.connected&&!wasConnected){void pollActiveView()}}catch(err){updateConnection(false);console.warn('RCON status check failed:',err.message)}}
 $('#connectBtn').addEventListener('click',async()=>{if(state.connected){if(confirm('Disconnect this RCON session?')){try{await post('/api/v2/disconnect',{});updateConnection(false);toast('RCON disconnected')}catch(e){toast(e.message,'error')}}}else{$('#rconHost').value=localStorage.getItem('hll_rcon_host')||'';$('#rconPort').value=localStorage.getItem('hll_rcon_port')||'';$('#connectError').textContent='';$('#connectDialog').showModal()}})
 $$('[data-close-dialog]').forEach(b=>b.onclick=()=>$('#connectDialog').close())
 $('#connectForm').addEventListener('submit',async e=>{e.preventDefault();$('#connectError').textContent='';const host=$('#rconHost').value.trim(),port=Number($('#rconPort').value),password=$('#rconPassword').value;const submit=e.submitter||$('#connectForm button[type="submit"]');const oldText=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Connecting...'}try{await post('/api/v2/connect',{host,port,password},CONNECT_REQUEST_TIMEOUT_MS);localStorage.setItem('hll_rcon_host',host);localStorage.setItem('hll_rcon_port',String(port));$('#rconPassword').value='';$('#connectDialog').close();updateConnection(true);toast('Connected to Hell Let Loose: Vietnam RCON');void refreshAllCore()}catch(err){$('#connectError').textContent=err.message}finally{if(submit){submit.disabled=false;submit.textContent=oldText||'Connect'}}})
@@ -207,7 +207,7 @@ async function pollActiveView(){
   }
 }
 
-setInterval(()=>{void pollActiveView()},30000);
+setInterval(()=>{if(!document.hidden)void pollActiveView()},30000);
 let resumePollTimer=null;
 document.addEventListener('visibilitychange',()=>{
   clearTimeout(resumePollTimer);
