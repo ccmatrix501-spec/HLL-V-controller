@@ -125,7 +125,10 @@
     }
   }
 
-  window.addEventListener('load', () => {
+  function installLiveSummary() {
+    if (document.documentElement.dataset.liveSummaryInstalled === '1') return;
+    document.documentElement.dataset.liveSummaryInstalled = '1';
+
     void refreshLiveSummary();
     setInterval(() => { void refreshLiveSummary(); }, POLL_MS);
 
@@ -135,5 +138,11 @@
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) void refreshLiveSummary();
     });
-  });
+  }
+
+  // Feature scripts are loaded dynamically after authentication. On a fast page
+  // the window load event has already fired by the time this module arrives, so
+  // waiting only for "load" silently prevented the live cards from ever starting.
+  if (document.readyState === 'complete') installLiveSummary();
+  else window.addEventListener('load', installLiveSummary, { once: true });
 })();
