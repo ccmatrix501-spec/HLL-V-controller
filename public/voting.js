@@ -357,7 +357,7 @@
     loadVoteState();
     setInterval(() => {
       if ($('#voting')?.classList.contains('active') || latest.active) loadVoteState();
-    }, 2000);
+    }, 5000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
