@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260919-v14-advanced-admin';
+  const FEATURE_VERSION = '20260920-ops-preview';
   // Mobile stability: only load the core controller at startup. Heavy feature
   // modules are lazy-loaded when their view is actually opened.
   // Keep startup extremely small on mobile. View-specific modules are loaded
@@ -360,7 +360,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '14.0.0-advanced-admin',
+    version: '15.0.0-ops-preview',
     retry() { return syncStatus(); },
     status() {
       return {
