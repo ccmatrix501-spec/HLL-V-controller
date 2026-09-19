@@ -453,7 +453,7 @@
                     </div>
                     <div class="tk-event-weapon">${esc(weaponName(entry))}</div>
                     ${entry?.victim_id ? `<div class="tk-event-id">Victim ID: ${esc(entry.victim_id)}</div>` : ''}
-                    ${raw ? `<details class="tk-event-raw"><summary>Raw teamkill log ${index + 1}</summary><code>${esc(raw)}</code></details>` : ''}
+                    ${raw ? `<details class="tk-event-raw"><summary>Raw teamkill log ${index + 1}</summary><code data-raw="${esc(raw)}">Open to inspect raw event</code></details>` : ''}
                   </article>`;
               }).join('')}
             </div>
