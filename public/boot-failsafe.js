@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260919-v11-deep-freeze-fix';
+  const FEATURE_VERSION = '20260919-v12-log-freeze-fix';
   // Mobile stability: only load the core controller at startup. Heavy feature
   // modules are lazy-loaded when their view is actually opened.
   // Keep startup extremely small on mobile. View-specific modules are loaded
@@ -21,7 +21,7 @@
     maps: ['/map-manager.js', '/map-names.js'],
     access: ['/access-manager.js', '/record-name-editor.js'],
     bans: ['/record-name-editor.js', '/ban-player-search.js'],
-    logs: ['/admin-logs.js', '/teamkill-monitor.js', '/commander-teamkill-review.js', '/commander-tempban-policy.js']
+    logs: ['/admin-logs.js']
   });
   const IDLE_FEATURES = Object.freeze(['/voting.js', '/leaderboard.js', '/match-leaderboard.js']);
 
@@ -233,6 +233,16 @@
     const nav = event.target?.closest?.('[data-view]');
     const view = nav?.dataset?.view;
     if (view && LAZY_FEATURES[view]) setTimeout(() => void loadLazyView(view), 0);
+
+    // Teamkill analysis is substantially heavier than the normal log viewer.
+    // Load it only when explicitly requested, not merely by opening Admin Logs.
+    const subtab = event.target?.closest?.('[data-admin-log-subtab="teamkill"]');
+    if (subtab) setTimeout(async () => {
+      for (const src of ['/teamkill-monitor.js','/commander-teamkill-review.js','/commander-tempban-policy.js']) {
+        try { await loadScript(src); }
+        catch (err) { console.error('[controller teamkill feature load]', src, err); }
+      }
+    }, 0);
   }, true);
 
   function loadFeatureScripts() {
@@ -351,7 +361,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '11.0.0-deep-freeze-fix',
+    version: '12.0.0-log-freeze-fix',
     retry() { return syncStatus(); },
     status() {
       return {
