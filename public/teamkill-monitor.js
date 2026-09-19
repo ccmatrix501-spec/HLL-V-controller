@@ -301,7 +301,10 @@
         <div class="tk-watch-controls">
           <label>Minimum <select id="tkMinimum"><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select> TKs</label>
           <label><input id="tkIncludeCommander" type="checkbox" /> Include commander abilities</label>
+          <div class="action-row">
+          <button id="tkCommanderReview" type="button" class="btn ghost small">Load Commander Review</button>
           <button id="tkRefresh" type="button" class="btn ghost small">Refresh</button>
+        </div>
         </div>
       </div>
       <div id="tkWatchSummary" class="tk-watch-summary muted">Loading teamkill history…</div>
@@ -317,6 +320,31 @@
     $('#tkMinimum')?.addEventListener('change', render);
     $('#tkIncludeCommander')?.addEventListener('change', render);
     $('#tkRefresh')?.addEventListener('click', () => { void load(); });
+    $('#tkCommanderReview')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Loading Commander Review…';
+      try {
+        for (const src of ['/commander-teamkill-review.js','/commander-tempban-policy.js']) {
+          if (!document.querySelector(`script[src="${src}"]`)) {
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = src;
+              script.async = false;
+              script.onload = resolve;
+              script.onerror = () => reject(new Error(`Failed to load ${src}`));
+              document.head.appendChild(script);
+            });
+          }
+        }
+        button.textContent = 'Commander Review Loaded';
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Load Commander Review';
+        alert(error?.message || String(error));
+      }
+    });
     $('#logRange')?.addEventListener('change', () => {
       if (teamkillViewVisible()) void load();
     });
