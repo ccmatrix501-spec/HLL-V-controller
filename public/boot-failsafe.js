@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260919-v12-log-freeze-fix';
+  const FEATURE_VERSION = '20260919-v13-teamkill-freeze-fix';
   // Mobile stability: only load the core controller at startup. Heavy feature
   // modules are lazy-loaded when their view is actually opened.
   // Keep startup extremely small on mobile. View-specific modules are loaded
@@ -238,10 +238,8 @@
     // Load it only when explicitly requested, not merely by opening Admin Logs.
     const subtab = event.target?.closest?.('[data-admin-log-subtab="teamkill"]');
     if (subtab) setTimeout(async () => {
-      for (const src of ['/teamkill-monitor.js','/commander-teamkill-review.js','/commander-tempban-policy.js']) {
-        try { await loadScript(src); }
-        catch (err) { console.error('[controller teamkill feature load]', src, err); }
-      }
+      try { await loadScript('/teamkill-monitor.js'); }
+      catch (err) { console.error('[controller teamkill feature load]', '/teamkill-monitor.js', err); }
     }, 0);
   }, true);
 
@@ -361,7 +359,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '12.0.0-log-freeze-fix',
+    version: '13.0.0-teamkill-freeze-fix',
     retry() { return syncStatus(); },
     status() {
       return {
