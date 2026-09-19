@@ -186,7 +186,19 @@ $('#unbanForm').addEventListener('submit',async e=>{e.preventDefault();const typ
 
 $$('.setting-form').forEach(form=>form.addEventListener('submit',async e=>{e.preventDefault();const body={};new FormData(form).forEach((v,k)=>{if(v==='true'||v==='false')body[k]=normalizeBool(v);else if(v!==''&&!Number.isNaN(Number(v))&&form.elements[k]?.type==='number')body[k]=Number(v);else body[k]=v});try{await post(form.dataset.endpoint,body);toast('Setting applied')}catch(err){toast(err.message,'error')}}))
 
-async function loadLogs(){if(!state.connected)return;try{$('#logsBox').textContent=pretty(await request(`/api/v2/logs?seconds=${encodeURIComponent($('#logRange').value)}`))}catch(e){$('#logsBox').textContent=e.message}}
+async function loadLogs(){
+  if(!state.connected)return;
+  // The enhanced viewer owns log retrieval/rendering. Avoid JSON.stringify +
+  // inserting the full raw RCON history into a <pre> on mobile; a one-hour
+  // response can contain well over 1,000 events and was blocking the UI thread.
+  if(document.documentElement.dataset.adminLogsViewer==='loading'||$('#adminLogsViewer'))return;
+  try{
+    const data=await request(`/api/v2/logs?seconds=${encodeURIComponent($('#logRange').value)}`);
+    const entries=Array.isArray(data?.entries)?data.entries:[];
+    const capped=entries.slice(0,100);
+    $('#logsBox').textContent=pretty({...data,entries:capped,_display_note:entries.length>capped.length?`Raw fallback capped at ${capped.length} of ${entries.length} events`:undefined});
+  }catch(e){$('#logsBox').textContent=e.message}
+}
 
 function refreshView(v){if(v==='dashboard')loadServer();if(v==='players')loadPlayers();if(v==='maps'){loadMaps();loadRotation()}if(v==='access')loadAccess();if(v==='bans')loadBans();if(v==='logs')loadLogs()}
 $$('[data-refresh]').forEach(b=>b.onclick=()=>refreshView(b.dataset.refresh==='server'?'dashboard':b.dataset.refresh))
