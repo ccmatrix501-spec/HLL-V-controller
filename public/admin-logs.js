@@ -253,6 +253,7 @@
     // has completed at least one successful RCON render. If this feature script
     // ever errors or receives an unexpected payload, staff still see the live
     // RCON response instead of a blank Logs page.
+    document.documentElement.dataset.adminLogsViewer = 'loading';
     showRawFallback('Loading Admin Logs…');
 
     const viewer = document.createElement('div');
