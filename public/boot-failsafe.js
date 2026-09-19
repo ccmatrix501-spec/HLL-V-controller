@@ -4,7 +4,7 @@
   const LOGIN_TIMEOUT_MS = 12000;
   const STATUS_TIMEOUT_MS = 8000;
   const CORE_TIMEOUT_MS = 12000;
-  const FEATURE_VERSION = '20260919-v13-teamkill-freeze-fix';
+  const FEATURE_VERSION = '20260919-v14-advanced-admin';
   // Mobile stability: only load the core controller at startup. Heavy feature
   // modules are lazy-loaded when their view is actually opened.
   // Keep startup extremely small on mobile. View-specific modules are loaded
@@ -21,6 +21,7 @@
     maps: ['/map-manager.js', '/map-names.js'],
     access: ['/access-manager.js', '/record-name-editor.js'],
     bans: ['/record-name-editor.js', '/ban-player-search.js'],
+    settings: ['/advanced-admin.js'],
     logs: ['/admin-logs.js']
   });
   const IDLE_FEATURES = Object.freeze(['/voting.js', '/leaderboard.js', '/match-leaderboard.js']);
@@ -359,7 +360,7 @@
   });
 
   window.__HLLVSafeBoot = {
-    version: '13.0.0-teamkill-freeze-fix',
+    version: '14.0.0-advanced-admin',
     retry() { return syncStatus(); },
     status() {
       return {
