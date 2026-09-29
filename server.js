@@ -11,6 +11,7 @@ const IS_RAILWAY = Boolean(process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY
 const PORT = Number(process.env.PORT || 8090);
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
+const HLLV_REPEAT_API_SECRET = String(process.env.HLLV_REPEAT_API_SECRET || '').trim();
 const RCON_BACKEND = process.env.RCON_BACKEND || (IS_RAILWAY
   ? 'http://rcon.railway.internal:8080'
   : 'http://rcon:8080');
@@ -108,6 +109,18 @@ function safeEqual(a, b) {
 function requireAuth(req, res, next) {
   if (req.session?.authenticated) return next();
   return res.status(401).json({ error: 'Controller login required' });
+}
+
+function requireRepeatApi(req, res, next) {
+  if (!HLLV_REPEAT_API_SECRET) {
+    return res.status(503).json({ error: 'HLLV repeat-message integration is not configured.' });
+  }
+  const auth = String(req.get('authorization') || '');
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (!token || !safeEqual(token, HLLV_REPEAT_API_SECRET)) {
+    return res.status(401).json({ error: 'Invalid integration credentials.' });
+  }
+  return next();
 }
 
 app.post('/controller/login', loginLimiter, (req, res) => {
@@ -446,6 +459,46 @@ app.delete('/controller/repeat-jobs', requireAuth, (req, res) => {
   repeatJobs = [];
   persistRepeatJobs();
   res.json({ ok: true });
+});
+
+// Read-only/limited integration for the separate Bot Controller.
+// Deliberately exposes ONLY active server-wide broadcast repeats.
+// Private/player repeat jobs, including join-time private information messages,
+// never leave this service through these endpoints.
+app.get('/integration/hllv/repeat-broadcasts', requireRepeatApi, (req, res) => {
+  const jobs = repeatJobs
+    .filter(job => job && job.type === 'broadcast' && job.active)
+    .map(job => ({
+      id: job.id,
+      type: 'broadcast',
+      message: job.message,
+      interval_seconds: Number(job.interval_seconds || 0),
+      repeat_count: Number(job.repeat_count || 0),
+      sent_count: Number(job.sent_count || 0),
+      active: Boolean(job.active),
+      running: Boolean(job.running),
+      created_at: job.created_at || null,
+      last_sent_at: job.last_sent_at || null,
+      next_run_at: job.next_run_at || null,
+      last_error: job.last_error || null
+    }));
+  res.set('Cache-Control', 'no-store');
+  res.json({ jobs, count: jobs.length });
+});
+
+app.delete('/integration/hllv/repeat-broadcasts/:id', requireRepeatApi, (req, res) => {
+  const index = repeatJobs.findIndex(job =>
+    job && job.id === req.params.id && job.type === 'broadcast'
+  );
+  if (index === -1) {
+    return res.status(404).json({ error: 'Active broadcast repeat not found.' });
+  }
+  if (repeatJobs[index].running) {
+    return res.status(409).json({ error: 'Broadcast is sending right now. Try again in a moment.' });
+  }
+  const [removed] = repeatJobs.splice(index, 1);
+  persistRepeatJobs();
+  res.json({ ok: true, removed_id: removed.id });
 });
 
 app.get('/api/v2/maps', requireAuth, (req, res) => {
